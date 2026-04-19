@@ -82,14 +82,25 @@ export const sourcesRoutes: FastifyPluginAsync = async (app) => {
     const params = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
     const existing = row(getDb().prepare("SELECT * FROM sources WHERE id = ?"), params.id);
     if (!existing) return reply.notFound("Source not found");
-    return startRecorder(params.id);
+    try {
+      return await startRecorder(params.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      eventBus.publish("source.recorder_error", { sourceId: params.id, error: message });
+      return reply.badRequest(`Failed to start recorder: ${message}`);
+    }
   });
 
   app.post("/sources/:id/stop", async (request, reply) => {
     const params = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
     const existing = row(getDb().prepare("SELECT * FROM sources WHERE id = ?"), params.id);
     if (!existing) return reply.notFound("Source not found");
-    return stopRecorder(params.id);
+    try {
+      return await stopRecorder(params.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.badRequest(`Failed to stop recorder: ${message}`);
+    }
   });
 
   app.delete("/sources/:id", async (request, reply) => {

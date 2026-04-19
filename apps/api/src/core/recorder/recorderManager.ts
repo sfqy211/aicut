@@ -100,10 +100,14 @@ export async function startRecorder(sourceId: number): Promise<RuntimeStatus> {
   if (existingId && manager.getRecorder(existingId)) {
     ensureCheckLoop();
     setRuntime(sourceId, existingId, { monitoring: true, state: "monitoring" });
+    console.log(`[Recorder] Source ${sourceId} already monitoring`);
     return runtimeBySource.get(sourceId)!;
   }
 
   const cookie = readCookie(source.cookie);
+  console.log(`[Recorder] Starting source ${sourceId}, room: ${source.room_id}`);
+  console.log(`[Recorder] Cookie auth: ${cookie.auth ? 'provided' : 'missing'}, uid: ${cookie.uid ?? 'not set'}`);
+
   const recorderId = `source-${source.id}`;
   fs.mkdirSync(path.join(libraryPaths.sources, source.room_id), { recursive: true });
 
@@ -133,6 +137,7 @@ export async function startRecorder(sourceId: number): Promise<RuntimeStatus> {
   recorderIdBySource.set(sourceId, recorderId);
   setRuntime(sourceId, recorderId, { monitoring: true, state: "monitoring" });
   ensureCheckLoop();
+  console.log(`[Recorder] Source ${sourceId} started, check loop: ${manager.isCheckLoopRunning}`);
   eventBus.publish("source.monitoring_started", { sourceId });
   return runtimeBySource.get(sourceId)!;
 }
@@ -176,10 +181,13 @@ function bindManagerEvents() {
   if (listenersBound) return;
   listenersBound = true;
 
+  console.log("[Recorder] Binding manager events");
+
   manager.on("RecordStart", ({ recorder, recordHandle }) => {
     const sourceId = getSourceIdFromRecorder(recorder);
     if (!sourceId) return;
     const sessionId = ensureActiveSession(sourceId, recorder);
+    console.log(`[Recorder] RecordStart: source ${sourceId}, session ${sessionId}, path: ${recordHandle.savePath}`);
     setRuntime(sourceId, recorder.id, {
       state: "recording",
       monitoring: true,
@@ -192,6 +200,7 @@ function bindManagerEvents() {
   manager.on("RecordStop", ({ recorder }) => {
     const sourceId = getSourceIdFromRecorder(recorder);
     if (!sourceId) return;
+    console.log(`[Recorder] RecordStop: source ${sourceId}`);
     const sessionId = activeSessionBySource.get(sourceId);
     if (sessionId) {
       getDb()
@@ -213,18 +222,21 @@ function bindManagerEvents() {
   manager.on("videoFileCompleted", ({ recorder, filename }) => {
     const sourceId = getSourceIdFromRecorder(recorder);
     if (!sourceId) return;
+    console.log(`[Recorder] VideoFileCompleted: source ${sourceId}, file: ${filename}`);
     try {
       const segmentId = createSegmentFromVideo(sourceId, recorder, filename);
       eventBus.publish("segment.created", { sourceId, segmentId, filePath: filename });
       enqueueAsrTask(segmentId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      console.error(`[Recorder] VideoFileCompleted error: ${message}`);
       setRuntime(sourceId, recorder.id, { state: "error", lastError: message });
       eventBus.publish("source.recorder_error", { sourceId, error: message });
     }
   });
 
   manager.on("error", ({ source, err }) => {
+    console.error(`[Recorder] Manager error: ${err instanceof Error ? err.message : String(err)}`);
     eventBus.publish("source.recorder_error", {
       source,
       error: err instanceof Error ? err.message : String(err)
