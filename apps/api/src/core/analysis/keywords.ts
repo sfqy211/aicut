@@ -157,6 +157,25 @@ export function getAllKeywords(): {
   };
 }
 
+// 获取关键词命中详情（用于 LLM 提示词）
+export function getKeywordMatches(text: string): string {
+  const result = countKeywords(text);
+  if (result.hits.length === 0) {
+    return "无关键词命中";
+  }
+
+  // 按分数降序排序
+  const sorted = [...result.hits].sort((a, b) => Math.abs(b.score) - Math.abs(a.score));
+
+  // 格式化输出
+  const details = sorted.slice(0, 10).map((hit) => {
+    const sign = hit.score >= 0 ? "+" : "";
+    return `${hit.keyword}(${sign}${hit.score.toFixed(1)}分,${hit.category})`;
+  });
+
+  return details.join("、");
+}
+
 // 向后兼容的导出
 export const positiveKeywords = loadKeywordsConfig().positive.map((k) => k.keyword);
 export const negativeKeywords = loadKeywordsConfig().negative.map((k) => k.keyword);

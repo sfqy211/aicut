@@ -116,6 +116,7 @@ export async function generateCandidates(sessionId: number): Promise<number> {
       scMessages: windowData.scMessages,
       transcriptText: windowData.transcriptText,
       energyPeak,
+      peakTime: windowData.peakTime ?? undefined,
     };
 
     const ruleScore = calculateRuleScore(windowWithEnergy, stats);
@@ -159,6 +160,7 @@ export async function generateCandidates(sessionId: number): Promise<number> {
             scMessages: item.windowData.scMessages,
             transcriptText: item.windowData.transcriptText,
             energyPeak: item.windowData.danmakuCount / item.window.duration,
+            peakTime: item.windowData.peakTime ?? undefined,
           },
           item.ruleScore,
           stats,

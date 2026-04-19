@@ -1,5 +1,12 @@
-import { countKeywords } from "./keywords.js";
+import { countKeywords, getKeywordMatches } from "./keywords.js";
 import type { SessionStats } from "./stats.js";
+
+export interface KeywordMatch {
+  keyword: string;
+  score: number;
+  category: string;
+  count: number;
+}
 
 export interface WindowData {
   startTime: number; // 秒
@@ -11,6 +18,8 @@ export interface WindowData {
   scMessages: string[];
   transcriptText: string;
   energyPeak: number; // 语速峰值
+  peakTime?: string; // 弹幕峰值时间点
+  keywordMatchDetails?: string; // 关键词命中详情
 }
 
 export interface RuleScore {

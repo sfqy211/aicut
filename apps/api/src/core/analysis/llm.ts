@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { getDb, row } from "../../db/index.js";
 import type { SessionStats } from "./stats.js";
 import type { RuleScore, WindowData } from "./rules.js";
+import { getKeywordMatches } from "./keywords.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -28,6 +29,14 @@ export interface LLMConfig {
   timeout?: number;
 }
 
+export interface TaskLLMSettings {
+  maxTokens: number;
+  temperature: number;
+  topP?: number;
+  responseFormat?: string;
+  description?: string;
+}
+
 export interface PromptsConfig {
   version: string;
   description: string;
@@ -50,12 +59,20 @@ export interface PromptsConfig {
     keyword: string;
     level: string;
     description: string;
+    action?: string;
   }>;
   settings: {
-    maxTokens: number;
-    temperature: number;
-    timeout: number;
-    maxConcurrency: number;
+    global: {
+      timeout: number;
+      maxConcurrency: number;
+      strictMode?: boolean;
+    };
+    taskConfig: {
+      scoring: TaskLLMSettings;
+      titleGeneration?: TaskLLMSettings;
+      summaryGeneration?: TaskLLMSettings;
+      [key: string]: TaskLLMSettings | undefined;
+    };
   };
 }
 
@@ -105,10 +122,16 @@ function getDefaultPrompts(): PromptsConfig {
     },
     riskKeywords: [],
     settings: {
-      maxTokens: 500,
-      temperature: 0.3,
-      timeout: 30000,
-      maxConcurrency: 3,
+      global: {
+        timeout: 30000,
+        maxConcurrency: 3,
+      },
+      taskConfig: {
+        scoring: {
+          maxTokens: 500,
+          temperature: 0.3,
+        },
+      },
     },
   };
 }
@@ -143,7 +166,7 @@ export function getLLMConfig(): LLMConfig | null {
     baseUrl: baseUrl.replace(/\/$/, ""),
     apiKey,
     model: model ?? "gpt-4o-mini",
-    timeout: loadPromptsConfig().settings.timeout,
+    timeout: loadPromptsConfig().settings.global.timeout,
   };
 }
 
@@ -173,6 +196,8 @@ function buildPrompt(
     ? (window.danmakuCount / stats.danmaku.densityPerMin * window.duration / 60).toFixed(1)
     : "1.0";
 
+  const keywordMatchDetails = getKeywordMatches(window.transcriptText);
+
   // 替换模板变量
   let userPrompt = template
     .replace(/\{\{streamerName\}\}/g, streamerName ?? "未知")
@@ -180,9 +205,11 @@ function buildPrompt(
     .replace(/\{\{startTime\}\}/g, formatTime(window.startTime))
     .replace(/\{\{endTime\}\}/g, formatTime(window.endTime))
     .replace(/\{\{duration\}\}/g, String(window.duration))
+    .replace(/\{\{peakTime\}\}/g, window.peakTime ?? "无")
     .replace(/\{\{danmakuCount\}\}/g, String(window.danmakuCount))
     .replace(/\{\{danmakuDensity\}\}/g, danmakuDensity)
     .replace(/\{\{topDanmaku\}\}/g, window.topDanmaku.join("、") || "无")
+    .replace(/\{\{keywordMatchDetails\}\}/g, keywordMatchDetails)
     .replace(/\{\{scTotal\}\}/g, (window.priceTotal / 100).toFixed(2))
     .replace(/\{\{scMessages\}\}/g, window.scMessages.slice(0, 5).join("、") || "无")
     .replace(/\{\{transcriptText\}\}/g, window.transcriptText || "无")
@@ -221,10 +248,11 @@ export async function scoreWithLLM(
   );
 
   try {
+    const taskSettings = promptsConfig.settings.taskConfig.scoring;
     const controller = new AbortController();
     const timeoutId = setTimeout(
       () => controller.abort(),
-      config.timeout ?? promptsConfig.settings.timeout
+      config.timeout ?? promptsConfig.settings.global.timeout
     );
 
     const response = await fetch(`${config.baseUrl}/v1/chat/completions`, {
@@ -239,8 +267,8 @@ export async function scoreWithLLM(
           { role: "system", content: system },
           { role: "user", content: user },
         ],
-        temperature: promptsConfig.settings.temperature,
-        max_tokens: promptsConfig.settings.maxTokens,
+        temperature: taskSettings.temperature,
+        max_tokens: taskSettings.maxTokens,
       }),
       signal: controller.signal,
     });

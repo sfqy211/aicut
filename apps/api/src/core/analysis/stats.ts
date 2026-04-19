@@ -268,6 +268,8 @@ export function getWindowData(
   topDanmaku: string[];
   scMessages: string[];
   transcriptText: string;
+  peakTime: string | null;
+  danmakuTimeline: Array<{ time: number; count: number }>;
 } {
   const db = getDb();
 
@@ -276,9 +278,10 @@ export function getWindowData(
     event_type: string;
     text: string;
     price: number;
+    timestamp_ms: number;
   }>(
     db.prepare(
-      `SELECT event_type, text, price FROM danmaku_events de
+      `SELECT event_type, text, price, timestamp_ms FROM danmaku_events de
        JOIN segments s ON s.id = de.segment_id
        WHERE s.session_id = ?
          AND de.timestamp_ms >= ?
@@ -292,11 +295,20 @@ export function getWindowData(
   let priceTotal = 0;
   const danmakuTexts: string[] = [];
   const scMessages: string[] = [];
+  const danmakuTimeline: Array<{ time: number; count: number }> = [];
+
+  // 按 5 秒窗口统计弹幕分布
+  const bucketSize = 5000; // 5 秒
+  const bucketCounts = new Map<number, number>();
 
   for (const e of events) {
     if (e.event_type === "danmaku") {
       danmakuCount++;
       if (e.text) danmakuTexts.push(e.text);
+
+      // 统计时间分布
+      const bucket = Math.floor((e.timestamp_ms - startTimeMs) / bucketSize);
+      bucketCounts.set(bucket, (bucketCounts.get(bucket) ?? 0) + 1);
     } else if (e.event_type === "super_chat") {
       priceTotal += e.price;
       if (e.text) scMessages.push(e.text);
@@ -304,6 +316,30 @@ export function getWindowData(
       priceTotal += e.price;
     }
   }
+
+  // 找弹幕峰值时间
+  let peakBucket = 0;
+  let peakCount = 0;
+  for (const [bucket, count] of bucketCounts) {
+    if (count > peakCount) {
+      peakCount = count;
+      peakBucket = bucket;
+    }
+  }
+
+  // 转换时间线
+  const windowDurationMs = endTimeMs - startTimeMs;
+  const totalBuckets = Math.ceil(windowDurationMs / bucketSize);
+  for (let i = 0; i < totalBuckets; i++) {
+    danmakuTimeline.push({
+      time: i * 5,
+      count: bucketCounts.get(i) ?? 0,
+    });
+  }
+
+  // 峰值时间（相对于窗口开始的秒数）
+  const peakTimeSeconds = peakBucket * 5;
+  const peakTime = peakCount > 0 ? formatTime(peakTimeSeconds) : null;
 
   // 统计高频弹幕
   const danmakuFreq = new Map<string, number>();
@@ -339,5 +375,14 @@ export function getWindowData(
     topDanmaku,
     scMessages: scMessages.slice(0, 10),
     transcriptText,
+    peakTime,
+    danmakuTimeline,
   };
+}
+
+// 格式化时间（秒 -> M:SS）
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
 }
