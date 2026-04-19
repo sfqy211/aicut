@@ -5,18 +5,9 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        display: ["Saira Condensed", "Bahnschrift", "sans-serif"],
-        body: ["Aptos", "Segoe UI", "sans-serif"]
+        sans: ['"Segoe UI Variable"', '"Segoe UI"', "system-ui", "-apple-system", "sans-serif"],
       },
-      colors: {
-        ink: "#17130f",
-        paper: "#f3eadc",
-        panel: "#261f18",
-        signal: "#e59c37",
-        verdict: "#5f7f5a",
-        danger: "#c6533d"
-      }
-    }
+    },
   },
-  plugins: []
+  plugins: [],
 } satisfies Config;

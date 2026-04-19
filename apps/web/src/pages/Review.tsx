@@ -24,10 +24,10 @@ function ScoreBar({ value, max, label, color }: { value: number; max: number; la
   return (
     <div className="score-bar">
       <span className="score-label">{label}</span>
-      <div className="score-track">
-        <div className={`score-fill ${color}`} style={{ width: `${percent}%` }} />
+      <div className="bar-bg">
+        <div className={`bar-fill ${color}`} style={{ width: `${percent}%` }} />
       </div>
-      <span className="score-value">{value.toFixed(0)}</span>
+      <span className="score-value mono">{value.toFixed(0)}</span>
     </div>
   );
 }
@@ -68,42 +68,35 @@ export function Review() {
   const pendingCount = candidates.filter((c) => c.status === "pending").length;
 
   return (
-    <section className="review-layout">
-      <div className="section-header">
-        <span className="eyebrow">Review Queue</span>
-        <h1>候选审核</h1>
-        <p>
-          待审核 <strong>{pendingCount}</strong> 个片段
-        </p>
-      </div>
-
-      <div className="review-filters">
-        <button className={filter === "pending" ? "active" : ""} onClick={() => setFilter("pending")}>
-          待审核
+    <div className="review-layout">
+      {/* Toolbar */}
+      <div className="review-toolbar">
+        <button className={`filter-btn ${filter === "pending" ? "active" : ""}`} onClick={() => setFilter("pending")}>
+          待审核 ({pendingCount})
         </button>
-        <button className={filter === "approved" ? "active" : ""} onClick={() => setFilter("approved")}>
+        <button className={`filter-btn ${filter === "approved" ? "active" : ""}`} onClick={() => setFilter("approved")}>
           已批准
         </button>
-        <button className={filter === "rejected" ? "active" : ""} onClick={() => setFilter("rejected")}>
+        <button className={`filter-btn ${filter === "rejected" ? "active" : ""}`} onClick={() => setFilter("rejected")}>
           已驳回
         </button>
-        <button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>
+        <button className={`filter-btn ${filter === "all" ? "active" : ""}`} onClick={() => setFilter("all")}>
           全部
         </button>
         {pendingCount > 0 && (
-          <button className="bulk-action" onClick={bulkApprove}>
+          <button className="btn btn-sm bulk-action" onClick={bulkApprove}>
             全部批准
           </button>
         )}
       </div>
 
       {candidates.length === 0 ? (
-        <div className="empty-state">
-          <p>还没有候选片段。</p>
-          <p className="hint">录制转写完成后，系统会自动生成候选片段。</p>
+        <div className="panel">
+          <div className="panel-body text-muted">暂无候选片段</div>
         </div>
       ) : (
         <div className="review-grid">
+          {/* Candidate List */}
           <div className="candidate-list">
             {candidates.map((candidate) => (
               <div
@@ -111,89 +104,81 @@ export function Review() {
                 className={`candidate-card ${candidate.id === selectedId ? "selected" : ""} ${candidate.status}`}
                 onClick={() => setSelectedId(candidate.id)}
               >
-                <div className="card-header">
-                  <span className="card-score">{candidate.score_total.toFixed(0)}</span>
-                  <span className="card-time">
-                    {formatTime(candidate.start_time)} - {formatTime(candidate.end_time)}
-                  </span>
+                <div className="card-score">
+                  <span className="card-score-value mono">{candidate.score_total.toFixed(0)}</span>
+                  <span className="card-score-label">分</span>
                 </div>
-                <div className="card-meta">
-                  <span className="card-duration">{formatDuration(candidate.duration)}</span>
-                  {candidate.llm_category && <span className="card-category">{candidate.llm_category}</span>}
+                <div className="card-content">
+                  <span className="card-time mono">{formatTime(candidate.start_time)} - {formatTime(candidate.end_time)}</span>
+                  <div className="card-meta">
+                    <span>{formatDuration(candidate.duration)}</span>
+                    {candidate.llm_category && <span className="card-category">{candidate.llm_category}</span>}
+                  </div>
+                  {candidate.ai_highlight && <p className="card-highlight">{candidate.ai_highlight}</p>}
+                  {candidate.ai_title_suggestion && <p className="card-title">{candidate.ai_title_suggestion}</p>}
+                  {candidate.llm_risk && <p className="card-risk">风险: {candidate.llm_risk}</p>}
+                  {candidate.status !== "pending" && (
+                    <span className={`status-badge ${candidate.status}`}>
+                      {candidate.status === "approved" ? "已批准" : "已驳回"}
+                    </span>
+                  )}
                 </div>
-                {candidate.ai_highlight && <p className="card-highlight">{candidate.ai_highlight}</p>}
-                {candidate.ai_title_suggestion && (
-                  <p className="card-title">{candidate.ai_title_suggestion}</p>
-                )}
-                {candidate.llm_risk && <p className="card-risk">⚠️ {candidate.llm_risk}</p>}
-                {candidate.status !== "pending" && (
-                  <span className={`status-badge ${candidate.status}`}>
-                    {candidate.status === "approved" ? "已批准" : "已驳回"}
-                  </span>
-                )}
               </div>
             ))}
           </div>
 
+          {/* Candidate Detail */}
           {selected && (
             <div className="candidate-detail">
-              <h2>片段详情</h2>
+              <div className="candidate-detail-title">片段详情</div>
 
               <div className="detail-section">
-                <h3>时间信息</h3>
-                <p>
-                  {formatTime(selected.start_time)} - {formatTime(selected.end_time)}（
-                  {formatDuration(selected.duration)}）
-                </p>
+                <div className="detail-section-title">时间信息</div>
+                <p>{formatTime(selected.start_time)} - {formatTime(selected.end_time)}（{formatDuration(selected.duration)}）</p>
               </div>
 
               <div className="detail-section">
-                <h3>评分详情</h3>
-                <ScoreBar value={selected.score_danmaku} max={40} label="弹幕密度" color="blue" />
-                <ScoreBar value={selected.score_interaction} max={30} label="付费互动" color="green" />
-                <ScoreBar value={selected.score_transcript} max={20} label="关键词" color="yellow" />
-                <ScoreBar value={selected.score_energy} max={10} label="能量" color="red" />
+                <div className="detail-section-title">评分详情</div>
+                <ScoreBar value={selected.score_danmaku} max={40} label="弹幕密度" color="accent" />
+                <ScoreBar value={selected.score_interaction} max={30} label="付费互动" color="success" />
+                <ScoreBar value={selected.score_transcript} max={20} label="关键词" color="warning" />
+                <ScoreBar value={selected.score_energy} max={10} label="能量" color="danger" />
                 <div className="total-score">
-                  规则分: <strong>{selected.rule_score.toFixed(1)}</strong> → 最终分:{" "}
-                  <strong>{selected.score_total.toFixed(1)}</strong>
+                  规则分: <strong className="mono">{selected.rule_score.toFixed(1)}</strong> → 最终分: <strong className="mono">{selected.score_total.toFixed(1)}</strong>
                 </div>
               </div>
 
               {selected.ai_title_suggestion && (
                 <div className="detail-section">
-                  <h3>推荐标题</h3>
-                  <p className="ai-title">{selected.ai_title_suggestion}</p>
+                  <div className="detail-section-title">推荐标题</div>
+                  <p style={{ fontWeight: 500 }}>{selected.ai_title_suggestion}</p>
                 </div>
               )}
 
               {selected.ai_reason && (
                 <div className="detail-section">
-                  <h3>推荐理由</h3>
+                  <div className="detail-section-title">推荐理由</div>
                   <p>{selected.ai_reason}</p>
                 </div>
               )}
 
               {selected.llm_risk && (
                 <div className="detail-section risk-section">
-                  <h3>⚠️ 风险提示</h3>
+                  <div className="detail-section-title" style={{ color: "var(--danger)" }}>风险提示</div>
                   <p>{selected.llm_risk}</p>
                 </div>
               )}
 
               {selected.status === "pending" && (
                 <div className="detail-actions">
-                  <button className="approve-button" onClick={() => approve(selected.id)}>
-                    ✓ 批准
-                  </button>
-                  <button className="reject-button" onClick={() => reject(selected.id)}>
-                    ✗ 驳回
-                  </button>
+                  <button className="btn btn-approve" onClick={() => approve(selected.id)}>批准</button>
+                  <button className="btn btn-reject" onClick={() => reject(selected.id)}>驳回</button>
                 </div>
               )}
             </div>
           )}
         </div>
       )}
-    </section>
+    </div>
   );
 }

@@ -32,62 +32,62 @@ export function Sessions() {
   }, [selectedId, lastEvent]);
 
   const segments = detail?.segments ?? [];
-  const selectedSession = useMemo(
-    () => sessions.find((session) => session.id === selectedId) ?? null,
-    [sessions, selectedId]
-  );
+  const selectedSession = useMemo(() => sessions.find((s) => s.id === selectedId) ?? null, [sessions, selectedId]);
 
   return (
-    <section className="sessions-layout">
-      <aside className="session-list-panel">
-        <div className="section-header compact">
-          <span className="eyebrow">Sessions</span>
-          <h1>直播会话</h1>
+    <div className="sessions-layout">
+      {/* Session List */}
+      <aside className="panel" style={{ display: "flex", flexDirection: "column" }}>
+        <div className="panel-header">
+          <span className="panel-title">会话列表</span>
+          <span className="tag">{sessions.length} SESSIONS</span>
         </div>
         <div className="session-list">
-          {sessions.map((session) => (
-            <button
-              key={session.id}
-              className={session.id === selectedId ? "session-chip active" : "session-chip"}
-              onClick={() => setSelectedId(session.id)}
-            >
-              <strong>{session.title || `Session #${session.id}`}</strong>
-              <small>{session.status}</small>
-            </button>
-          ))}
-          {sessions.length === 0 && <p className="empty">暂无会话。</p>}
+          {sessions.length === 0 ? (
+            <div className="panel-body text-muted">暂无会话</div>
+          ) : (
+            sessions.map((session) => (
+              <button
+                key={session.id}
+                className={`session-chip ${session.id === selectedId ? "active" : ""}`}
+                onClick={() => setSelectedId(session.id)}
+              >
+                <span className="session-chip-title">{session.title || `Session #${session.id}`}</span>
+                <span className="session-chip-meta">{session.status}</span>
+              </button>
+            ))
+          )}
         </div>
       </aside>
-      <div className="session-detail-panel">
-        <div className="section-header compact">
-          <span className="eyebrow">Detail</span>
-          <h1>{selectedSession?.title || "选择一场会话"}</h1>
-          <p>这里展示录制分段、转写状态、弹幕热度与文本内容。</p>
+
+      {/* Session Detail */}
+      <div className="panel" style={{ display: "flex", flexDirection: "column" }}>
+        <div className="panel-header">
+          <span className="panel-title">{selectedSession?.title || "选择会话"}</span>
+          {selectedSession && <span className="tag">{selectedSession.session_type === "live" ? "直播" : "导入"}</span>}
         </div>
         {detail == null ? (
-          <p className="empty">还没有可展示的会话。</p>
+          <div className="panel-body text-muted">暂无数据</div>
         ) : (
-          <div className="segment-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>分段</th>
-                  <th>状态</th>
-                  <th>时长</th>
-                  <th>弹幕热度</th>
-                  <th>转写文本</th>
-                </tr>
-              </thead>
-              <tbody>
-                {segments.map((segment) => (
-                  <SegmentRow key={segment.id} segment={segment} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>分段</th>
+                <th>状态</th>
+                <th>时长</th>
+                <th>弹幕热度</th>
+                <th>转写</th>
+              </tr>
+            </thead>
+            <tbody>
+              {segments.map((segment) => (
+                <SegmentRow key={segment.id} segment={segment} />
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -97,18 +97,21 @@ function SegmentRow({ segment }: { segment: SessionSegment }) {
   return (
     <tr>
       <td>
-        <strong>#{segment.id}</strong>
-        <div className="subtle">{segment.file_path.split(/[\\/]/).pop()}</div>
+        <span className="mono">#{segment.id}</span>
       </td>
-      <td>{segment.status}</td>
-      <td>{formatSeconds(segment.duration)}</td>
+      <td className={segment.status === "completed" ? "text-success" : segment.status === "failed" ? "text-danger" : "text-muted"}>
+        {segment.status}
+      </td>
+      <td className="mono">{formatSeconds(segment.duration)}</td>
       <td>
         <div className="heat-strip">
-          <span style={{ width: `${heat}%` }} />
+          <div className="heat-strip-fill" style={{ width: `${heat}%` }} />
         </div>
-        <small>{segment.danmaku_count} 条</small>
+        <span className="mono text-muted" style={{ fontSize: 11 }}>{segment.danmaku_count}</span>
       </td>
-      <td className="transcript-cell">{segment.transcript_text || segment.error_msg || "等待转写结果"}</td>
+      <td style={{ maxWidth: 360, color: "var(--text-secondary)", lineHeight: 1.4 }}>
+        {segment.transcript_text || segment.error_msg || "等待转写"}
+      </td>
     </tr>
   );
 }

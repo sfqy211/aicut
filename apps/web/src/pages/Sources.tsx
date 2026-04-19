@@ -52,45 +52,41 @@ export function Sources() {
   }
 
   return (
-    <section className="page-stack">
-      <div className="section-header">
-        <span className="eyebrow">Sources</span>
-        <h1>直播源管理</h1>
-        <p>先记录房间与主播名。录制器接入后，这里会控制自动监听、分段和 Cookie 登录。</p>
-      </div>
-      <div className="form-panel">
-        <label>
-          房间号
-          <input value={roomId} onChange={(event) => setRoomId(event.target.value)} placeholder="7734200" />
-        </label>
-        <label>
-          主播名
-          <input value={streamerName} onChange={(event) => setStreamerName(event.target.value)} placeholder="可选" />
-        </label>
-        <label className="wide-input">
-          Cookie / cookie.json 路径
-          <input
-            value={cookie}
-            onChange={(event) => setCookie(event.target.value)}
-            placeholder="可填原始 Cookie，或本地 cookie.json 路径"
-          />
-        </label>
-        <button onClick={addSource} disabled={!roomId || submitting}>
-          添加 B站直播源
+    <>
+      {/* Add Source Form */}
+      <div className="form-row">
+        <div className="form-group">
+          <label className="form-label">房间号</label>
+          <input className="form-input" value={roomId} onChange={(e) => setRoomId(e.target.value)} placeholder="7734200" />
+        </div>
+        <div className="form-group">
+          <label className="form-label">主播名</label>
+          <input className="form-input" value={streamerName} onChange={(e) => setStreamerName(e.target.value)} placeholder="可选" />
+        </div>
+        <div className="form-group flex-1">
+          <label className="form-label">Cookie / cookie.json 路径</label>
+          <input className="form-input" value={cookie} onChange={(e) => setCookie(e.target.value)} placeholder="原始 Cookie 或本地 cookie.json 路径" />
+        </div>
+        <button className="btn btn-primary" onClick={addSource} disabled={!roomId || submitting}>
+          添加直播源
         </button>
       </div>
-      <div className="table-panel">
-        <h2>已配置直播源</h2>
+
+      {/* Sources Table */}
+      <div className="panel">
+        <div className="panel-header">
+          <span className="panel-title">直播源配置</span>
+          <span className="tag">{sources.length} SOURCES</span>
+        </div>
         {sources.length === 0 ? (
-          <p className="empty">还没有直播源。</p>
+          <div className="panel-body text-muted">暂无直播源</div>
         ) : (
-          <table>
+          <table className="data-table">
             <thead>
               <tr>
-                <th>房间</th>
+                <th>房间号</th>
                 <th>主播</th>
                 <th>Cookie</th>
-                <th>自动录制</th>
                 <th>状态</th>
                 <th>进度</th>
                 <th>操作</th>
@@ -99,25 +95,31 @@ export function Sources() {
             <tbody>
               {sources.map((source) => (
                 <tr key={source.id}>
-                  <td>{source.room_id}</td>
+                  <td className="mono">{source.room_id}</td>
                   <td>{source.streamer_name || "-"}</td>
-                  <td className="cookie-cell">
+                  <td>
                     <input
+                      className="form-input"
                       defaultValue={source.cookie || ""}
-                      placeholder="原始 Cookie 或 cookie.json 路径"
-                      onBlur={(event) => {
-                        if (event.target.value !== (source.cookie || "")) {
-                          void updateCookie(source.id, event.target.value);
+                      placeholder="Cookie 或路径"
+                      onBlur={(e) => {
+                        if (e.target.value !== (source.cookie || "")) {
+                          void updateCookie(source.id, e.target.value);
                         }
                       }}
+                      style={{ minWidth: "180px" }}
                     />
                   </td>
-                  <td>{source.auto_record ? "开启" : "关闭"}</td>
-                  <td>{source.runtime?.state || "idle"}</td>
-                  <td>{source.runtime?.progressTime || "-"}</td>
                   <td>
-                    <button className="mini-button" onClick={() => toggleMonitoring(source)}>
-                      {source.runtime?.monitoring ? "停止监控" : "启动监控"}
+                    <StatusBadge state={source.runtime?.state} />
+                  </td>
+                  <td className="mono text-muted">{source.runtime?.progressTime || "-"}</td>
+                  <td>
+                    <button
+                      className={`btn btn-sm ${source.runtime?.monitoring ? "btn-danger" : "btn-primary"}`}
+                      onClick={() => toggleMonitoring(source)}
+                    >
+                      {source.runtime?.monitoring ? "停止" : "启动"}
                     </button>
                   </td>
                 </tr>
@@ -126,6 +128,21 @@ export function Sources() {
           </table>
         )}
       </div>
-    </section>
+    </>
   );
+}
+
+function StatusBadge({ state }: { state?: string }) {
+  if (!state) return <span className="text-muted">-</span>;
+
+  const map: Record<string, { label: string; cls: string }> = {
+    idle: { label: "空闲", cls: "text-muted" },
+    monitoring: { label: "监控中", cls: "text-success" },
+    recording: { label: "录制中", cls: "text-success" },
+    stopping: { label: "停止中", cls: "text-warning" },
+    error: { label: "错误", cls: "text-danger" },
+  };
+
+  const info = map[state] || { label: state, cls: "" };
+  return <span className={info.cls}>{info.label}</span>;
 }
