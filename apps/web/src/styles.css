@@ -78,7 +78,8 @@ input {
 }
 
 .page-stack,
-.review-layout {
+.review-layout,
+.sessions-layout {
   display: grid;
   gap: 24px;
 }
@@ -191,9 +192,13 @@ th {
 
 .form-panel {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
+  grid-template-columns: 1fr 1fr 1.3fr auto;
   gap: 16px;
   align-items: end;
+}
+
+.wide-input {
+  min-width: 0;
 }
 
 label {
@@ -249,6 +254,75 @@ button:disabled {
 .candidate-list {
   display: grid;
   gap: 14px;
+}
+
+.sessions-layout {
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  align-items: start;
+}
+
+.session-list-panel,
+.session-detail-panel {
+  border: 1px solid rgba(243, 234, 220, 0.12);
+  background: rgba(38, 31, 24, 0.82);
+  box-shadow: 0 22px 80px rgba(0, 0, 0, 0.22);
+  padding: 22px;
+}
+
+.section-header.compact h1 {
+  font-size: clamp(28px, 4vw, 44px);
+}
+
+.session-list {
+  display: grid;
+  gap: 10px;
+}
+
+.session-chip {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  border: 1px solid rgba(243, 234, 220, 0.1);
+  color: #f3eadc;
+  background: rgba(243, 234, 220, 0.04);
+}
+
+.session-chip.active {
+  border-color: rgba(229, 156, 55, 0.48);
+  background: rgba(229, 156, 55, 0.14);
+}
+
+.subtle {
+  color: rgba(243, 234, 220, 0.46);
+  font-size: 12px;
+}
+
+.heat-strip {
+  width: 160px;
+  height: 10px;
+  overflow: hidden;
+  background: rgba(243, 234, 220, 0.08);
+}
+
+.heat-strip span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #5f7f5a, #e59c37, #c6533d);
+}
+
+.transcript-cell {
+  max-width: 520px;
+  color: rgba(243, 234, 220, 0.82);
+  line-height: 1.6;
+}
+
+.cookie-cell input {
+  min-width: 260px;
+}
+
+.mini-button {
+  padding: 8px 12px;
+  font-size: 13px;
 }
 
 .candidate-card {
@@ -339,7 +413,8 @@ button:disabled {
 
   .page-grid,
   .form-panel,
-  .candidate-card {
+  .candidate-card,
+  .sessions-layout {
     grid-template-columns: 1fr;
   }
 }

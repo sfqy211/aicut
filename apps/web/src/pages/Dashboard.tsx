@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { apiGet } from "../api/client";
 import { useEventStream } from "../hooks/useEventStream";
-import type { Candidate, Session, Source } from "../types";
+import type { Candidate, Session, SessionOverview, Source } from "../types";
 
 export function Dashboard() {
   const [sources, setSources] = useState<Source[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [overview, setOverview] = useState<SessionOverview | null>(null);
   const lastEvent = useEventStream();
 
   useEffect(() => {
@@ -14,6 +15,7 @@ export function Dashboard() {
       apiGet<Source[]>("/api/sources").then(setSources),
       apiGet<Session[]>("/api/sessions").then(setSessions),
       apiGet<Candidate[]>("/api/candidates?status=pending").then(setCandidates),
+      apiGet<SessionOverview>("/api/sessions/overview").then(setOverview),
     ]);
   }, [lastEvent]);
 
@@ -25,9 +27,10 @@ export function Dashboard() {
         <p>当前阶段已接通本地数据库、REST API 和实时事件流，后续会继续接入录制器、ASR 队列与 LLM 分析。</p>
       </div>
       <div className="metrics-panel">
-        <Metric label="直播源" value={sources.length} />
-        <Metric label="会话" value={sessions.length} />
-        <Metric label="待审候选" value={candidates.length} />
+        <Metric label="录制中" value={overview?.recording ?? 0} />
+        <Metric label="转写中" value={overview?.transcribing ?? 0} />
+        <Metric label="排队中" value={overview?.queued ?? 0} />
+        <Metric label="待审核" value={candidates.length} />
         <Metric label="最近事件" value={lastEvent} compact />
       </div>
       <div className="table-panel wide">
@@ -51,6 +54,35 @@ export function Dashboard() {
                   <td>{session.session_type}</td>
                   <td>{session.status}</td>
                   <td>{session.room_id || "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      <div className="table-panel wide">
+        <h2>直播源状态</h2>
+        {sources.length === 0 ? (
+          <p className="empty">还没有直播源。</p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>房间</th>
+                <th>主播</th>
+                <th>监控</th>
+                <th>状态</th>
+                <th>录制进度</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sources.map((source) => (
+                <tr key={source.id}>
+                  <td>{source.room_id}</td>
+                  <td>{source.streamer_name || "-"}</td>
+                  <td>{source.runtime?.monitoring ? "开启" : "关闭"}</td>
+                  <td>{source.runtime?.state || "idle"}</td>
+                  <td>{source.runtime?.progressTime || "-"}</td>
                 </tr>
               ))}
             </tbody>

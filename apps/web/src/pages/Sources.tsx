@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
-import { apiGet, apiPost } from "../api/client";
+import { apiGet, apiPatch, apiPost } from "../api/client";
+import { useEventStream } from "../hooks/useEventStream";
 import type { Source } from "../types";
 
 export function Sources() {
   const [sources, setSources] = useState<Source[]>([]);
   const [roomId, setRoomId] = useState("");
   const [streamerName, setStreamerName] = useState("");
+  const [cookie, setCookie] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const lastEvent = useEventStream();
 
   async function refresh() {
     setSources(await apiGet<Source[]>("/api/sources"));
@@ -13,16 +17,37 @@ export function Sources() {
 
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [lastEvent]);
 
   async function addSource() {
-    await apiPost("/api/sources/bilibili", {
-      roomId,
-      streamerName,
-      autoRecord: true,
-    });
-    setRoomId("");
-    setStreamerName("");
+    setSubmitting(true);
+    try {
+      await apiPost("/api/sources/bilibili", {
+        roomId,
+        streamerName,
+        cookie,
+        autoRecord: true,
+      });
+      setRoomId("");
+      setStreamerName("");
+      setCookie("");
+      await refresh();
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function toggleMonitoring(source: Source) {
+    if (source.runtime?.monitoring) {
+      await apiPost(`/api/sources/${source.id}/stop`, {});
+    } else {
+      await apiPost(`/api/sources/${source.id}/start`, {});
+    }
+    await refresh();
+  }
+
+  async function updateCookie(sourceId: number, nextCookie: string) {
+    await apiPatch(`/api/sources/${sourceId}`, { cookie: nextCookie });
     await refresh();
   }
 
@@ -42,7 +67,15 @@ export function Sources() {
           主播名
           <input value={streamerName} onChange={(event) => setStreamerName(event.target.value)} placeholder="可选" />
         </label>
-        <button onClick={addSource} disabled={!roomId}>
+        <label className="wide-input">
+          Cookie / cookie.json 路径
+          <input
+            value={cookie}
+            onChange={(event) => setCookie(event.target.value)}
+            placeholder="可填原始 Cookie，或本地 cookie.json 路径"
+          />
+        </label>
+        <button onClick={addSource} disabled={!roomId || submitting}>
           添加 B站直播源
         </button>
       </div>
@@ -56,7 +89,11 @@ export function Sources() {
               <tr>
                 <th>房间</th>
                 <th>主播</th>
+                <th>Cookie</th>
                 <th>自动录制</th>
+                <th>状态</th>
+                <th>进度</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -64,7 +101,25 @@ export function Sources() {
                 <tr key={source.id}>
                   <td>{source.room_id}</td>
                   <td>{source.streamer_name || "-"}</td>
+                  <td className="cookie-cell">
+                    <input
+                      defaultValue={source.cookie || ""}
+                      placeholder="原始 Cookie 或 cookie.json 路径"
+                      onBlur={(event) => {
+                        if (event.target.value !== (source.cookie || "")) {
+                          void updateCookie(source.id, event.target.value);
+                        }
+                      }}
+                    />
+                  </td>
                   <td>{source.auto_record ? "开启" : "关闭"}</td>
+                  <td>{source.runtime?.state || "idle"}</td>
+                  <td>{source.runtime?.progressTime || "-"}</td>
+                  <td>
+                    <button className="mini-button" onClick={() => toggleMonitoring(source)}>
+                      {source.runtime?.monitoring ? "停止监控" : "启动监控"}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -1,4 +1,4 @@
-import { Activity, Database, Radio, WandSparkles } from "lucide-react";
+import { Activity, Database, Radio, Rows3, WandSparkles } from "lucide-react";
 
 type Props = {
   activePage: string;
@@ -8,6 +8,7 @@ type Props = {
 const items = [
   { id: "dashboard", label: "总览", icon: Activity },
   { id: "sources", label: "直播源", icon: Radio },
+  { id: "sessions", label: "会话", icon: Rows3 },
   { id: "review", label: "审核", icon: WandSparkles },
   { id: "exports", label: "导出", icon: Database },
 ];
