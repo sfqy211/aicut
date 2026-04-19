@@ -42,12 +42,11 @@ export function calculateRuleScore(
   const interactionScore =
     30 * sigmoid((window.priceTotal / interactionThreshold - 1) * 2);
 
-  // 3. 关键词分 (20分) - 固定规则
+  // 3. 关键词分 (20分) - 使用配置文件中的分值
   const keywordResult = countKeywords(window.transcriptText);
-  const keywordScore = Math.min(
-    20,
-    Math.max(0, keywordResult.positive * 5 - keywordResult.negative * 10)
-  );
+  // positive 和 negative 已包含权重，直接计算
+  const keywordRawScore = keywordResult.positive - keywordResult.negative;
+  const keywordScore = Math.min(20, Math.max(0, keywordRawScore));
 
   // 4. 声音能量分 (10分) - 阈值 = P90
   const energyThreshold = Math.max(1, stats.energy.p90);

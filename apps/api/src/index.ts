@@ -11,6 +11,7 @@ import { eventsRoutes } from "./routes/events.js";
 import { exportsRoutes } from "./routes/exports.js";
 import { importsRoutes } from "./routes/imports.js";
 import { sessionsRoutes } from "./routes/sessions.js";
+import { settingsRoutes } from "./routes/settings.js";
 import { sourcesRoutes } from "./routes/sources.js";
 
 export async function buildServer() {
@@ -37,6 +38,7 @@ export async function buildServer() {
   await app.register(sessionsRoutes, { prefix: "/api" });
   await app.register(candidatesRoutes, { prefix: "/api" });
   await app.register(exportsRoutes, { prefix: "/api" });
+  await app.register(settingsRoutes, { prefix: "/api" });
   await app.register(eventsRoutes, { prefix: "/api" });
 
   app.addHook("onReady", async () => {

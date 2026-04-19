@@ -1,6 +1,11 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { getDb, row } from "../../db/index.js";
 import type { SessionStats } from "./stats.js";
 import type { RuleScore, WindowData } from "./rules.js";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 export interface LLMResult {
   worth: boolean;
@@ -21,6 +26,97 @@ export interface LLMConfig {
   apiKey: string;
   model: string;
   timeout?: number;
+}
+
+export interface PromptsConfig {
+  version: string;
+  description: string;
+  systemPrompts: {
+    scoring: { role: string; content: string };
+    [key: string]: { role: string; content: string };
+  };
+  userPrompts: {
+    scoring: {
+      template: string;
+      variables: string[];
+    };
+    [key: string]: {
+      template: string;
+      variables: string[];
+    };
+  };
+  categories: Record<string, { emoji: string; description: string }>;
+  riskKeywords: Array<{
+    keyword: string;
+    level: string;
+    description: string;
+  }>;
+  settings: {
+    maxTokens: number;
+    temperature: number;
+    timeout: number;
+    maxConcurrency: number;
+  };
+}
+
+let cachedPrompts: PromptsConfig | null = null;
+
+// 加载提示词配置
+export function loadPromptsConfig(): PromptsConfig {
+  if (cachedPrompts) return cachedPrompts;
+
+  const configPath = path.join(repoRoot, "config/prompts.json");
+
+  if (!fs.existsSync(configPath)) {
+    console.warn(`Prompts config not found at ${configPath}, using defaults`);
+    return getDefaultPrompts();
+  }
+
+  try {
+    const content = fs.readFileSync(configPath, "utf8");
+    cachedPrompts = JSON.parse(content) as PromptsConfig;
+    return cachedPrompts;
+  } catch (error) {
+    console.error(`Failed to load prompts config: ${error}`);
+    return getDefaultPrompts();
+  }
+}
+
+// 默认提示词
+function getDefaultPrompts(): PromptsConfig {
+  return {
+    version: "0.0.0",
+    description: "Default prompts",
+    systemPrompts: {
+      scoring: {
+        role: "system",
+        content: "你是一个专业的直播切片分析助手。请严格按照 JSON 格式输出。",
+      },
+    },
+    userPrompts: {
+      scoring: {
+        template: "请分析这个直播片段是否值得剪辑。",
+        variables: [],
+      },
+    },
+    categories: {
+      高能: { emoji: "🔥", description: "" },
+      搞笑: { emoji: "😂", description: "" },
+    },
+    riskKeywords: [],
+    settings: {
+      maxTokens: 500,
+      temperature: 0.3,
+      timeout: 30000,
+      maxConcurrency: 3,
+    },
+  };
+}
+
+// 重新加载配置
+export function reloadPromptsConfig(): void {
+  cachedPrompts = null;
+  loadPromptsConfig();
 }
 
 // 获取 LLM 配置
@@ -47,69 +143,11 @@ export function getLLMConfig(): LLMConfig | null {
     baseUrl: baseUrl.replace(/\/$/, ""),
     apiKey,
     model: model ?? "gpt-4o-mini",
-    timeout: 30000,
+    timeout: loadPromptsConfig().settings.timeout,
   };
 }
 
-// 构建 LLM prompt
-function buildPrompt(
-  window: WindowData,
-  ruleScore: RuleScore,
-  stats: SessionStats,
-  streamerName?: string,
-  liveTitle?: string
-): string {
-  const danmakuDensity = stats.danmaku.densityPerMin > 0
-    ? (window.danmakuCount / stats.danmaku.densityPerMin * window.duration / 60).toFixed(1)
-    : "1.0";
-
-  return `你是一个直播切片专家，负责判断一个直播片段是否值得剪辑成短视频。
-
-## 直播信息
-- 主播：${streamerName ?? "未知"}
-- 标题：${liveTitle ?? "未知"}
-
-## 片段信息
-- 时间：${formatTime(window.startTime)} - ${formatTime(window.endTime)}（${window.duration}秒）
-- 弹幕数：${window.danmakuCount} 条（是平均值的 ${danmakuDensity} 倍）
-- 高频弹幕：${window.topDanmaku.join("、") || "无"}
-- SC 金额：${(window.priceTotal / 100).toFixed(2)} 元
-- SC 内容：${window.scMessages.slice(0, 5).join("、") || "无"}
-- 转写文本：${window.transcriptText || "无"}
-
-## 规则评分
-- 总分：${ruleScore.total.toFixed(1)} / 100
-- 弹幕分：${ruleScore.danmaku.toFixed(1)} / 40
-- 互动分：${ruleScore.interaction.toFixed(1)} / 30
-- 关键词分：${ruleScore.keyword.toFixed(1)} / 20
-- 能量分：${ruleScore.energy.toFixed(1)} / 10
-
-## 任务
-请判断这个片段是否值得剪辑，并给出你的分析。
-
-## 输出格式（JSON）
-{
-  "worth": boolean,
-  "confidence": number,
-  "category": string,
-  "highlight": string,
-  "title": string,
-  "reason": string,
-  "risk": string | null,
-  "suggestedAdjustment": { "trimStart": number, "trimEnd": number }
-}
-
-字段说明：
-- worth: 是否值得切
-- confidence: 置信度 0-1
-- category: 分类（高能/搞笑/感人/整活/技术/聊天/其他）
-- highlight: 核心看点（一句话，20字内）
-- title: 推荐标题（带emoji，30字内）
-- reason: 推荐理由（50字内）
-- risk: 风险提示（如：争议言论、敏感词），无则为 null
-- suggestedAdjustment: 建议的时间调整（秒）`;
-}
-
+// 格式化时间
 function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -118,6 +156,46 @@ function formatTime(seconds: number): string {
     return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+// 构建提示词
+function buildPrompt(
+  window: WindowData,
+  ruleScore: RuleScore,
+  stats: SessionStats,
+  streamerName?: string,
+  liveTitle?: string
+): { system: string; user: string } {
+  const config = loadPromptsConfig();
+  const template = config.userPrompts.scoring.template;
+
+  const danmakuDensity = stats.danmaku.densityPerMin > 0
+    ? (window.danmakuCount / stats.danmaku.densityPerMin * window.duration / 60).toFixed(1)
+    : "1.0";
+
+  // 替换模板变量
+  let userPrompt = template
+    .replace(/\{\{streamerName\}\}/g, streamerName ?? "未知")
+    .replace(/\{\{liveTitle\}\}/g, liveTitle ?? "未知")
+    .replace(/\{\{startTime\}\}/g, formatTime(window.startTime))
+    .replace(/\{\{endTime\}\}/g, formatTime(window.endTime))
+    .replace(/\{\{duration\}\}/g, String(window.duration))
+    .replace(/\{\{danmakuCount\}\}/g, String(window.danmakuCount))
+    .replace(/\{\{danmakuDensity\}\}/g, danmakuDensity)
+    .replace(/\{\{topDanmaku\}\}/g, window.topDanmaku.join("、") || "无")
+    .replace(/\{\{scTotal\}\}/g, (window.priceTotal / 100).toFixed(2))
+    .replace(/\{\{scMessages\}\}/g, window.scMessages.slice(0, 5).join("、") || "无")
+    .replace(/\{\{transcriptText\}\}/g, window.transcriptText || "无")
+    .replace(/\{\{ruleScoreTotal\}\}/g, ruleScore.total.toFixed(1))
+    .replace(/\{\{ruleScoreDanmaku\}\}/g, ruleScore.danmaku.toFixed(1))
+    .replace(/\{\{ruleScoreInteraction\}\}/g, ruleScore.interaction.toFixed(1))
+    .replace(/\{\{ruleScoreKeyword\}\}/g, ruleScore.keyword.toFixed(1))
+    .replace(/\{\{ruleScoreEnergy\}\}/g, ruleScore.energy.toFixed(1));
+
+  return {
+    system: config.systemPrompts.scoring.content,
+    user: userPrompt,
+  };
 }
 
 // 调用 LLM API
@@ -133,7 +211,8 @@ export async function scoreWithLLM(
     return null;
   }
 
-  const prompt = buildPrompt(
+  const promptsConfig = loadPromptsConfig();
+  const { system, user } = buildPrompt(
     window,
     ruleScore,
     stats,
@@ -143,7 +222,10 @@ export async function scoreWithLLM(
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), config.timeout ?? 30000);
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      config.timeout ?? promptsConfig.settings.timeout
+    );
 
     const response = await fetch(`${config.baseUrl}/v1/chat/completions`, {
       method: "POST",
@@ -154,14 +236,11 @@ export async function scoreWithLLM(
       body: JSON.stringify({
         model: config.model,
         messages: [
-          {
-            role: "system",
-            content: "你是一个专业的直播切片分析助手。请严格按照 JSON 格式输出，不要添加任何额外文字。",
-          },
-          { role: "user", content: prompt },
+          { role: "system", content: system },
+          { role: "user", content: user },
         ],
-        temperature: 0.3,
-        max_tokens: 500,
+        temperature: promptsConfig.settings.temperature,
+        max_tokens: promptsConfig.settings.maxTokens,
       }),
       signal: controller.signal,
     });
@@ -217,21 +296,21 @@ export function calculateFinalScore(
   llmResult: LLMResult | null
 ): number {
   if (!llmResult) {
-    // 未触发 LLM，使用规则分
     return ruleScore.total;
   }
 
   if (!llmResult.worth) {
-    // LLM 判断不值得，降权
     return ruleScore.total * 0.5;
   }
 
-  // LLM 确认值得，加权
-  const llmBoost = llmResult.confidence * 20; // 最多加 20 分
+  const llmBoost = llmResult.confidence * 20;
   const adjustedScore = ruleScore.total + llmBoost;
-
-  // 风险惩罚
   const riskPenalty = llmResult.risk ? 15 : 0;
 
   return Math.min(100, Math.max(0, adjustedScore - riskPenalty));
+}
+
+// 获取配置（供 API 使用）
+export function getPromptsConfig() {
+  return loadPromptsConfig();
 }
