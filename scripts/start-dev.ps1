@@ -1,8 +1,7 @@
 param(
     [string]$ProjectDir = "",
     [string]$AsrVenv = "",
-    [int]$WindowWidth = 120,
-    [int]$WindowHeight = 30
+    [switch]$SkipCleanup
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,6 +12,21 @@ if (-not $ProjectDir) {
 
 Write-Host "AICut Development Starter" -ForegroundColor Cyan
 Write-Host "Project: $ProjectDir`n"
+
+# 清理残留端口进程
+if (-not $SkipCleanup) {
+    Write-Host "Checking for existing processes on ports..." -ForegroundColor Yellow
+    $ports = @(43110, 43111, 43112)
+    foreach ($port in $ports) {
+        $conn = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
+        if ($conn) {
+            $pid = $conn.OwningProcess
+            Write-Host "  Killing process $pid on port $port" -ForegroundColor Yellow
+            Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Start-Sleep -Milliseconds 500
+}
 
 # 查找 ASR venv
 if (-not $AsrVenv) {
@@ -38,13 +52,6 @@ function Start-ServiceWindow {
         [string]$WorkingDir = $ProjectDir
     )
 
-    $scriptBlock = {
-        param($Dir, $Cmd)
-        Set-Location $Dir
-        Invoke-Expression $Cmd
-        Read-Host "Press Enter to close"
-    }
-
     $psArgs = @(
         "-NoExit",
         "-Command",
@@ -59,12 +66,15 @@ function Start-ServiceWindow {
 Write-Host "`nStarting services..." -ForegroundColor Cyan
 Start-ServiceWindow -Title "AICut-API" -Command "pnpm dev:api"
 
+Start-Sleep -Milliseconds 300
+
 # 启动 Web
 Start-ServiceWindow -Title "AICut-Web" -Command "pnpm dev:web"
 
+Start-Sleep -Milliseconds 300
+
 # 启动 ASR
 $asrDir = Join-Path $ProjectDir "services\asr-worker"
-$env:AICUT_ASR_ALLOW_STUB = "1"
 Start-ServiceWindow -Title "AICut-ASR" -Command "Set-Location '$asrDir'; `$env:AICUT_ASR_ALLOW_STUB='1'; $AsrVenv main.py"
 
 Write-Host "`nAll services started in separate windows." -ForegroundColor Green
