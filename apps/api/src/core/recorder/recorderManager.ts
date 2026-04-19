@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { provider as bilibiliProvider } from "@bililive-tools/bilibili-recorder";
 import {
   createRecorderManager,
@@ -13,6 +14,8 @@ import { findDanmakuSidecar, importDanmakuForSegment } from "../danmaku/parser.j
 import { libraryPaths } from "../library/index.js";
 import { getDb, row, rows } from "../../db/index.js";
 import { eventBus } from "../../events/bus.js";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 type SourceRow = {
   id: number;
@@ -346,31 +349,65 @@ function getSourceIdFromRecorder(recorder: SerializedRecorder<RecorderExtra>): n
 }
 
 function readCookie(cookie: string | null): { auth?: string; uid?: number } {
-  if (!cookie?.trim()) return {};
-  const raw = cookie.trim();
-  let content = raw;
+  // 如果提供了 cookie 参数
+  if (cookie?.trim()) {
+    const raw = cookie.trim();
+    let content = raw;
 
-  if (!raw.includes("=") && fs.existsSync(path.resolve(raw))) {
-    content = fs.readFileSync(path.resolve(raw), "utf8");
-  } else if (fs.existsSync(raw)) {
-    content = fs.readFileSync(raw, "utf8");
+    // 检查是否是文件路径
+    if (!raw.includes("=") && fs.existsSync(path.resolve(raw))) {
+      content = fs.readFileSync(path.resolve(raw), "utf8");
+    } else if (fs.existsSync(raw)) {
+      content = fs.readFileSync(raw, "utf8");
+    }
+
+    return parseCookieContent(content);
   }
 
-  if (content.trim().startsWith("{") || content.trim().startsWith("[")) {
-    const parsed = JSON.parse(content);
-    const cookies = Array.isArray(parsed)
-      ? parsed
-      : Array.isArray(parsed.cookies)
-        ? parsed.cookies
-        : Object.entries(parsed).map(([name, value]) => ({ name, value }));
-    const auth = cookies
-      .map((item: any) => `${item.name ?? item.key}=${item.value}`)
-      .filter((item: string) => item && !item.startsWith("undefined="))
-      .join("; ");
-    return { auth, uid: extractUid(auth) };
+  // 默认从 config/cookie.json 读取
+  const configCookiePath = path.join(repoRoot, "config/cookie.json");
+  if (fs.existsSync(configCookiePath)) {
+    try {
+      const content = fs.readFileSync(configCookiePath, "utf8");
+      return parseCookieContent(content);
+    } catch (error) {
+      console.warn(`Failed to read config/cookie.json: ${error}`);
+    }
   }
 
-  return { auth: content, uid: extractUid(content) };
+  return {};
+}
+
+function parseCookieContent(content: string): { auth?: string; uid?: number } {
+  const trimmed = content.trim();
+
+  // 如果是 JSON 格式
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      // 跳过注释字段
+      if (parsed.cookie && typeof parsed.cookie === "string") {
+        return { auth: parsed.cookie, uid: extractUid(parsed.cookie) };
+      }
+      // 数组格式
+      const cookies = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed.cookies)
+          ? parsed.cookies
+          : Object.entries(parsed)
+              .filter(([key]) => !key.startsWith("_"))
+              .map(([name, value]) => ({ name, value }));
+      const auth = cookies
+        .map((item: any) => `${item.name ?? item.key}=${item.value}`)
+        .filter((item: string) => item && !item.startsWith("undefined=") && !item.startsWith("_"))
+        .join("; ");
+      return { auth, uid: extractUid(auth) };
+    } catch {
+      // JSON 解析失败，作为原始字符串处理
+    }
+  }
+
+  return { auth: trimmed, uid: extractUid(trimmed) };
 }
 
 function extractUid(cookie: string): number | undefined {

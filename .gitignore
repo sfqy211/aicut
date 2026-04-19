@@ -10,13 +10,15 @@ coverage/
 .env
 .env.local
 *.log
-cookie.json
 
 library/
 data/
 *.db
 *.db-shm
 *.db-wal
+
+# 用户配置文件（包含敏感信息）
+config/
 
 services/asr-worker/.venv/
 services/asr-worker/__pycache__/
