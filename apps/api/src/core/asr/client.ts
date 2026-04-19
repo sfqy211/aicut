@@ -1,6 +1,7 @@
 import { config } from "../../config.js";
 import { getDb, row } from "../../db/index.js";
 import { eventBus } from "../../events/bus.js";
+import { tryGenerateCandidates } from "../analysis/scoring.js";
 
 export type StandardASRSegment = {
   start: number;
@@ -122,6 +123,11 @@ async function processSegment(segmentId: number) {
     updateSessionTotals(segment.session_id);
     publishProgress(segmentId, 100, "ready");
     eventBus.publish("segment.transcription_completed", { segmentId, sessionId: segment.session_id });
+
+    // 尝试生成候选片段（如果 session 所有分段都已转写完成）
+    void tryGenerateCandidates(segment.session_id).catch((err) => {
+      console.error(`Failed to generate candidates for session ${segment.session_id}:`, err);
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     db.prepare("UPDATE segments SET status = 'error', error_msg = @message, updated_at = unixepoch() WHERE id = @segmentId").run({
