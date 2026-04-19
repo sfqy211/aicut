@@ -2,8 +2,9 @@ import cors from "@fastify/cors";
 import sensible from "@fastify/sensible";
 import Fastify from "fastify";
 import { config } from "./config.js";
+import { restoreAsrQueue } from "./core/asr/client.js";
 import { ensureLibrary } from "./core/library/index.js";
-import { getRecorderStatus } from "./core/recorder/recorderManager.js";
+import { getRecorderStatus, restoreAutoRecorders } from "./core/recorder/recorderManager.js";
 import { getDb } from "./db/index.js";
 import { candidatesRoutes } from "./routes/candidates.js";
 import { eventsRoutes } from "./routes/events.js";
@@ -37,6 +38,11 @@ export async function buildServer() {
   await app.register(candidatesRoutes, { prefix: "/api" });
   await app.register(exportsRoutes, { prefix: "/api" });
   await app.register(eventsRoutes, { prefix: "/api" });
+
+  app.addHook("onReady", async () => {
+    await restoreAutoRecorders();
+    restoreAsrQueue();
+  });
 
   return app;
 }

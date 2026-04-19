@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
+import { getSourceRuntime, startRecorder, stopRecorder } from "../core/recorder/recorderManager.js";
 import { getDb, row, rows } from "../db/index.js";
 import { eventBus } from "../events/bus.js";
 
@@ -13,7 +14,10 @@ const sourceInput = z.object({
 
 export const sourcesRoutes: FastifyPluginAsync = async (app) => {
   app.get("/sources", async () => {
-    return rows(getDb().prepare("SELECT * FROM sources ORDER BY id DESC"));
+    return rows<any>(getDb().prepare("SELECT * FROM sources ORDER BY id DESC")).map((source) => ({
+      ...source,
+      runtime: getSourceRuntime(source.id)
+    }));
   });
 
   app.post("/sources/bilibili", async (request, reply) => {
@@ -34,6 +38,14 @@ export const sourcesRoutes: FastifyPluginAsync = async (app) => {
 
     const source = row(db.prepare("SELECT * FROM sources WHERE id = ?"), result.lastInsertRowid);
     eventBus.publish("source.created", { id: result.lastInsertRowid });
+    if (input.autoRecord !== false) {
+      void startRecorder(Number(result.lastInsertRowid)).catch((error) => {
+        eventBus.publish("source.recorder_error", {
+          sourceId: result.lastInsertRowid,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      });
+    }
     return reply.code(201).send(source);
   });
 
@@ -64,6 +76,20 @@ export const sourcesRoutes: FastifyPluginAsync = async (app) => {
 
     eventBus.publish("source.updated", { id: params.id });
     return row(db.prepare("SELECT * FROM sources WHERE id = ?"), params.id);
+  });
+
+  app.post("/sources/:id/start", async (request, reply) => {
+    const params = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
+    const existing = row(getDb().prepare("SELECT * FROM sources WHERE id = ?"), params.id);
+    if (!existing) return reply.notFound("Source not found");
+    return startRecorder(params.id);
+  });
+
+  app.post("/sources/:id/stop", async (request, reply) => {
+    const params = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
+    const existing = row(getDb().prepare("SELECT * FROM sources WHERE id = ?"), params.id);
+    if (!existing) return reply.notFound("Source not found");
+    return stopRecorder(params.id);
   });
 
   app.delete("/sources/:id", async (request, reply) => {

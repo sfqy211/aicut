@@ -16,5 +16,6 @@ export const config = {
   dbPath: resolveFromRoot(process.env.AICUT_DB_PATH ?? "./library/aicut.db"),
   libraryRoot: resolveFromRoot(process.env.AICUT_LIBRARY_ROOT ?? "./library"),
   asrWorkerUrl: process.env.AICUT_ASR_WORKER_URL ?? "http://127.0.0.1:43112",
-  ffmpegPath: process.env.AICUT_FFMPEG_PATH ?? "ffmpeg"
+  ffmpegPath: process.env.AICUT_FFMPEG_PATH ?? "ffmpeg",
+  recorderSegment: process.env.AICUT_RECORDER_SEGMENT ?? "30"
 };

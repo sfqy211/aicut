@@ -1,12 +1,388 @@
+import fs from "node:fs";
+import path from "node:path";
+import { provider as bilibiliProvider } from "@bililive-tools/bilibili-recorder";
+import {
+  createRecorderManager,
+  setFFMPEGPath,
+  type RecorderManager,
+  type SerializedRecorder
+} from "@bililive-tools/manager";
+import { config } from "../../config.js";
+import { enqueueAsrTask } from "../asr/client.js";
+import { findDanmakuSidecar, importDanmakuForSegment } from "../danmaku/parser.js";
+import { libraryPaths } from "../library/index.js";
+import { getDb, row, rows } from "../../db/index.js";
+import { eventBus } from "../../events/bus.js";
+
+type SourceRow = {
+  id: number;
+  room_id: string;
+  streamer_name: string | null;
+  cookie: string | null;
+  auto_record: number;
+  output_dir: string | null;
+};
+
+type RuntimeStatus = {
+  sourceId: number;
+  recorderId: string;
+  monitoring: boolean;
+  state: "idle" | "monitoring" | "recording" | "stopping" | "error";
+  sessionId: number | null;
+  progressTime: string | null;
+  lastError: string | null;
+  updatedAt: number;
+};
+
 export type RecorderStatus = {
   enabled: boolean;
   message: string;
+  activeSources: number;
 };
+
+type RecorderExtra = { sourceId?: number };
+
+const recorderIdBySource = new Map<number, string>();
+const activeSessionBySource = new Map<number, number>();
+const runtimeBySource = new Map<number, RuntimeStatus>();
+let listenersBound = false;
+
+setFFMPEGPath(config.ffmpegPath);
+
+const manager = createRecorderManager<RecorderExtra>({
+  providers: [bilibiliProvider],
+  savePathRule: path.join(
+    libraryPaths.sources,
+    "{channelId}",
+    "{year}-{month}-{date}",
+    "{hour}-{min}-{sec} {title}"
+  ),
+  autoCheckInterval: 5000,
+  maxThreadCount: 1,
+  waitTime: 500,
+  autoRemoveSystemReservedChars: true,
+  biliBatchQuery: false,
+  providerCheckConfig: {
+    Bilibili: {
+      autoCheckInterval: 5000,
+      maxThreadCount: 1,
+      waitTime: 500
+    }
+  }
+});
+
+bindManagerEvents();
 
 export function getRecorderStatus(): RecorderStatus {
   return {
-    enabled: false,
-    message:
-      "Recorder integration is scaffolded. Next step: wire @bililive-tools/manager and @bililive-tools/bilibili-recorder."
+    enabled: true,
+    activeSources: runtimeBySource.size,
+    message: manager.isCheckLoopRunning ? "Recorder check loop is running." : "Recorder is idle."
   };
+}
+
+export function getSourceRuntime(sourceId: number): RuntimeStatus | null {
+  return runtimeBySource.get(sourceId) ?? null;
+}
+
+export function listSourceRuntime(): RuntimeStatus[] {
+  return [...runtimeBySource.values()];
+}
+
+export async function startRecorder(sourceId: number): Promise<RuntimeStatus> {
+  const source = getSource(sourceId);
+  if (!source) throw new Error(`Source ${sourceId} not found`);
+
+  const existingId = recorderIdBySource.get(sourceId);
+  if (existingId && manager.getRecorder(existingId)) {
+    ensureCheckLoop();
+    setRuntime(sourceId, existingId, { monitoring: true, state: "monitoring" });
+    return runtimeBySource.get(sourceId)!;
+  }
+
+  const cookie = readCookie(source.cookie);
+  const recorderId = `source-${source.id}`;
+  fs.mkdirSync(path.join(libraryPaths.sources, source.room_id), { recursive: true });
+
+  manager.addRecorder({
+    id: recorderId,
+    providerId: "Bilibili",
+    channelId: source.room_id,
+    remarks: source.streamer_name ?? `room-${source.room_id}`,
+    quality: 10000,
+    streamPriorities: [],
+    sourcePriorities: [],
+    segment: config.recorderSegment,
+    saveGiftDanma: true,
+    saveSCDanma: true,
+    saveCover: true,
+    disableProvideCommentsWhenRecording: false,
+    auth: cookie.auth,
+    uid: cookie.uid,
+    useServerTimestamp: true,
+    recorderType: "ffmpeg",
+    videoFormat: "auto",
+    formatName: "auto",
+    codecName: "auto",
+    extra: { sourceId }
+  });
+
+  recorderIdBySource.set(sourceId, recorderId);
+  setRuntime(sourceId, recorderId, { monitoring: true, state: "monitoring" });
+  ensureCheckLoop();
+  eventBus.publish("source.monitoring_started", { sourceId });
+  return runtimeBySource.get(sourceId)!;
+}
+
+export async function stopRecorder(sourceId: number): Promise<RuntimeStatus | null> {
+  const recorderId = recorderIdBySource.get(sourceId);
+  if (!recorderId) return runtimeBySource.get(sourceId) ?? null;
+
+  const recorder = manager.getRecorder(recorderId);
+  if (recorder) {
+    setRuntime(sourceId, recorderId, { state: "stopping" });
+    await manager.stopRecord(recorderId);
+    manager.removeRecorder(recorder);
+  }
+
+  recorderIdBySource.delete(sourceId);
+  activeSessionBySource.delete(sourceId);
+  setRuntime(sourceId, recorderId, { monitoring: false, state: "idle", progressTime: null });
+  eventBus.publish("source.monitoring_stopped", { sourceId });
+  return runtimeBySource.get(sourceId) ?? null;
+}
+
+export async function restoreAutoRecorders() {
+  const sources = rows<SourceRow>(
+    getDb().prepare("SELECT * FROM sources WHERE auto_record = 1 ORDER BY id ASC")
+  );
+  for (const source of sources) {
+    try {
+      await startRecorder(source.id);
+    } catch (error) {
+      setRuntime(source.id, `source-${source.id}`, {
+        monitoring: false,
+        state: "error",
+        lastError: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+}
+
+function bindManagerEvents() {
+  if (listenersBound) return;
+  listenersBound = true;
+
+  manager.on("RecordStart", ({ recorder, recordHandle }) => {
+    const sourceId = getSourceIdFromRecorder(recorder);
+    if (!sourceId) return;
+    const sessionId = ensureActiveSession(sourceId, recorder);
+    setRuntime(sourceId, recorder.id, {
+      state: "recording",
+      monitoring: true,
+      sessionId,
+      progressTime: recordHandle.progress?.time ?? null
+    });
+    eventBus.publish("source.recording_started", { sourceId, sessionId, savePath: recordHandle.savePath });
+  });
+
+  manager.on("RecordStop", ({ recorder }) => {
+    const sourceId = getSourceIdFromRecorder(recorder);
+    if (!sourceId) return;
+    const sessionId = activeSessionBySource.get(sourceId);
+    if (sessionId) {
+      getDb()
+        .prepare("UPDATE sessions SET status = 'processing', end_time = unixepoch(), updated_at = unixepoch() WHERE id = ?")
+        .run(sessionId);
+    }
+    activeSessionBySource.delete(sourceId);
+    setRuntime(sourceId, recorder.id, { state: "monitoring", sessionId: null, progressTime: null });
+    eventBus.publish("source.recording_stopped", { sourceId, sessionId: sessionId ?? null });
+  });
+
+  manager.on("RecorderProgress", ({ recorder, progress }) => {
+    const sourceId = getSourceIdFromRecorder(recorder);
+    if (!sourceId) return;
+    setRuntime(sourceId, recorder.id, { progressTime: progress.time ?? null });
+    eventBus.publish("source.recorder_progress", { sourceId, progress });
+  });
+
+  manager.on("videoFileCompleted", ({ recorder, filename }) => {
+    const sourceId = getSourceIdFromRecorder(recorder);
+    if (!sourceId) return;
+    try {
+      const segmentId = createSegmentFromVideo(sourceId, recorder, filename);
+      eventBus.publish("segment.created", { sourceId, segmentId, filePath: filename });
+      enqueueAsrTask(segmentId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRuntime(sourceId, recorder.id, { state: "error", lastError: message });
+      eventBus.publish("source.recorder_error", { sourceId, error: message });
+    }
+  });
+
+  manager.on("error", ({ source, err }) => {
+    eventBus.publish("source.recorder_error", {
+      source,
+      error: err instanceof Error ? err.message : String(err)
+    });
+  });
+}
+
+function createSegmentFromVideo(sourceId: number, recorder: SerializedRecorder<RecorderExtra>, filename: string): number {
+  const db = getDb();
+  const sessionId = ensureActiveSession(sourceId, recorder);
+  const stat = fs.statSync(filename);
+  const danmakuPath = findDanmakuSidecar(filename);
+  const startOffset = getNextStartOffset(sessionId);
+
+  const result = db
+    .prepare(
+      `INSERT INTO segments (session_id, file_path, start_offset, size, has_danmaku, danmaku_path, status)
+       VALUES (@sessionId, @filePath, @startOffset, @size, @hasDanmaku, @danmakuPath, 'pending')`
+    )
+    .run({
+      sessionId,
+      filePath: filename,
+      startOffset,
+      size: stat.size,
+      hasDanmaku: danmakuPath ? 1 : 0,
+      danmakuPath
+    });
+
+  const segmentId = Number(result.lastInsertRowid);
+  if (danmakuPath) {
+    importDanmakuForSegment(segmentId, danmakuPath);
+  }
+  updateSessionSize(sessionId);
+  return segmentId;
+}
+
+function ensureActiveSession(sourceId: number, recorder: SerializedRecorder<RecorderExtra>): number {
+  const cached = activeSessionBySource.get(sourceId);
+  if (cached) return cached;
+
+  const db = getDb();
+  const existing = row<{ id: number }>(
+    db.prepare(
+      `SELECT id FROM sessions
+       WHERE source_id = ? AND status IN ('recording', 'processing')
+       ORDER BY id DESC LIMIT 1`
+    ),
+    sourceId
+  );
+  if (existing) {
+    activeSessionBySource.set(sourceId, existing.id);
+    return existing.id;
+  }
+
+  const liveInfo = recorder.liveInfo;
+  const result = db
+    .prepare(
+      `INSERT INTO sessions (source_id, session_type, title, start_time, status)
+       VALUES (@sourceId, 'live', @title, @startTime, 'recording')`
+    )
+    .run({
+      sourceId,
+      title: liveInfo?.title ?? `Bilibili ${recorder.channelId}`,
+      startTime: Math.floor(toTimestamp(liveInfo?.recordStartTime) / 1000)
+    });
+
+  const sessionId = Number(result.lastInsertRowid);
+  activeSessionBySource.set(sourceId, sessionId);
+  return sessionId;
+}
+
+function getNextStartOffset(sessionId: number): number {
+  const value = row<{ nextOffset: number | null }>(
+    getDb().prepare(
+      `SELECT COALESCE(MAX(start_offset + COALESCE(duration, 1800)), 0) AS nextOffset
+       FROM segments
+       WHERE session_id = ?`
+    ),
+    sessionId
+  );
+  return value?.nextOffset ?? 0;
+}
+
+function updateSessionSize(sessionId: number) {
+  const totals = row<{ size: number | null }>(
+    getDb().prepare("SELECT SUM(COALESCE(size, 0)) AS size FROM segments WHERE session_id = ?"),
+    sessionId
+  );
+  getDb()
+    .prepare("UPDATE sessions SET total_size = @size, updated_at = unixepoch() WHERE id = @sessionId")
+    .run({ sessionId, size: totals?.size ?? 0 });
+}
+
+function ensureCheckLoop() {
+  if (!manager.isCheckLoopRunning) {
+    manager.startCheckLoop();
+  }
+}
+
+function setRuntime(sourceId: number, recorderId: string, patch: Partial<RuntimeStatus>) {
+  const previous = runtimeBySource.get(sourceId);
+  runtimeBySource.set(sourceId, {
+    sourceId,
+    recorderId,
+    monitoring: previous?.monitoring ?? false,
+    state: previous?.state ?? "idle",
+    sessionId: previous?.sessionId ?? null,
+    progressTime: previous?.progressTime ?? null,
+    lastError: previous?.lastError ?? null,
+    updatedAt: Date.now(),
+    ...patch
+  });
+}
+
+function getSource(sourceId: number): SourceRow | undefined {
+  return row<SourceRow>(getDb().prepare("SELECT * FROM sources WHERE id = ?"), sourceId);
+}
+
+function getSourceIdFromRecorder(recorder: SerializedRecorder<RecorderExtra>): number | null {
+  const sourceId = recorder.extra?.sourceId;
+  return typeof sourceId === "number" ? sourceId : null;
+}
+
+function readCookie(cookie: string | null): { auth?: string; uid?: number } {
+  if (!cookie?.trim()) return {};
+  const raw = cookie.trim();
+  let content = raw;
+
+  if (!raw.includes("=") && fs.existsSync(path.resolve(raw))) {
+    content = fs.readFileSync(path.resolve(raw), "utf8");
+  } else if (fs.existsSync(raw)) {
+    content = fs.readFileSync(raw, "utf8");
+  }
+
+  if (content.trim().startsWith("{") || content.trim().startsWith("[")) {
+    const parsed = JSON.parse(content);
+    const cookies = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed.cookies)
+        ? parsed.cookies
+        : Object.entries(parsed).map(([name, value]) => ({ name, value }));
+    const auth = cookies
+      .map((item: any) => `${item.name ?? item.key}=${item.value}`)
+      .filter((item: string) => item && !item.startsWith("undefined="))
+      .join("; ");
+    return { auth, uid: extractUid(auth) };
+  }
+
+  return { auth: content, uid: extractUid(content) };
+}
+
+function extractUid(cookie: string): number | undefined {
+  const match = cookie.match(/(?:^|;\s*)DedeUserID=(\d+)/);
+  return match ? Number(match[1]) : undefined;
+}
+
+function toTimestamp(value: unknown): number {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "string" || typeof value === "number") {
+    const timestamp = new Date(value).getTime();
+    return Number.isFinite(timestamp) ? timestamp : Date.now();
+  }
+  return Date.now();
 }
