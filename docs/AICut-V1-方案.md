@@ -95,6 +95,11 @@ aicut/
 │   ├── check-env.js         # 环境检测（模型）
 │   └── download-model.js    # 自动下载 whisper small 模型
 │
+├── config/                  # 配置文件目录（gitignore）
+│   ├── keywords.json        # 评分关键词配置
+│   ├── prompts.json         # LLM 提示词配置
+│   └── cookie.json          # B站 Cookie 配置
+│
 └── package.json             # workspace root
 ```
 

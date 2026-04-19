@@ -325,31 +325,88 @@ export const analysisConfig = {
 
 ---
 
-## 关键词列表
+## 关键词配置
 
-```typescript
-// keywords.ts
-export const positiveKeywords = [
-  // 表达惊喜/激动
-  '666', 'nb', '牛逼', '厉害', '强', '绝了', '太强了',
-  
-  // 表达搞笑
-  '哈哈哈', '笑死', '哈哈哈哈', '乐死', '笑不活了',
-  
-  // 表达感动
-  '泪目', '哭了', '感动', '破防', '呜呜',
-  
-  // 表达高能
-  '高能', '前方高能', '来了来了', '注意看',
-  
-  // 表达互动
-  '爱了', '冲', '急', '救命', '神仙'
-];
+关键词已抽离为独立配置文件 `config/keywords.json`：
 
-export const negativeKeywords = [
-  '无聊', '没意思', '困了', '睡着了', '无聊死了'
-];
+```json
+{
+  "version": "1.0.0",
+  "positive": [
+    { "keyword": "666", "score": 5, "category": "惊喜", "aliases": ["牛逼666", "6翻了"] },
+    { "keyword": "笑死", "score": 5, "category": "搞笑", "aliases": ["笑死我了", "笑不活了"] },
+    { "keyword": "泪目", "score": 5, "category": "感动", "aliases": ["泪目了", "破防"] },
+    { "keyword": "高能", "score": 5, "category": "高能", "aliases": ["前方高能", "高能预警"] }
+  ],
+  "negative": [
+    { "keyword": "无聊", "score": -8, "category": "负面", "aliases": ["好无聊", "太无聊了"] }
+  ],
+  "categories": {
+    "惊喜": { "weight": 1.0 },
+    "搞笑": { "weight": 1.0 },
+    "感动": { "weight": 1.0 },
+    "高能": { "weight": 1.3 },
+    "互动": { "weight": 0.7 },
+    "干货": { "weight": 1.1 },
+    "负面": { "weight": 1.5 }
+  }
+}
 ```
+
+---
+
+## LLM 提示词配置
+
+提示词配置抽离为 `config/prompts.json`，支持任务级别参数：
+
+```json
+{
+  "version": "2.0.0",
+  "systemPrompts": {
+    "scoring": { "role": "system", "content": "..." },
+    "titleGeneration": { "role": "system", "content": "..." },
+    "summaryGeneration": { "role": "system", "content": "..." }
+  },
+  "userPrompts": {
+    "scoring": { "template": "...", "variables": [...] }
+  },
+  "settings": {
+    "global": { "timeout": 30000, "maxConcurrency": 3 },
+    "taskConfig": {
+      "scoring": { "maxTokens": 800, "temperature": 0.1 },
+      "titleGeneration": { "maxTokens": 200, "temperature": 0.7 },
+      "summaryGeneration": { "maxTokens": 150, "temperature": 0.3 }
+    }
+  }
+}
+```
+
+---
+
+## 模板变量
+
+评分模板支持以下变量：
+
+| 变量 | 说明 |
+|------|------|
+| `{{streamerName}}` | 主播名称 |
+| `{{liveTitle}}` | 直播标题 |
+| `{{startTime}}` | 片段开始时间 |
+| `{{endTime}}` | 片段结束时间 |
+| `{{duration}}` | 片段时长（秒） |
+| `{{peakTime}}` | 弹幕峰值时间点 |
+| `{{danmakuCount}}` | 弹幕总数 |
+| `{{danmakuDensity}}` | 相对弹幕密度倍数 |
+| `{{topDanmaku}}` | 高频弹幕 TOP5 |
+| `{{keywordMatchDetails}}` | 关键词命中详情 |
+| `{{scTotal}}` | SC/礼物总金额（元） |
+| `{{scMessages}}` | SC 消息内容 |
+| `{{transcriptText}}` | 转写文本 |
+| `{{ruleScoreTotal}}` | 规则总分 |
+| `{{ruleScoreDanmaku}}` | 弹幕分 /40 |
+| `{{ruleScoreInteraction}}` | 互动分 /30 |
+| `{{ruleScoreKeyword}}` | 关键词分 /20 |
+| `{{ruleScoreEnergy}}` | 能量分 /10 |
 
 ---
 
@@ -369,4 +426,4 @@ ALTER TABLE candidates ADD COLUMN suggested_trim_end INTEGER DEFAULT 0;
 
 ---
 
-*更新日期: 2026-04-19*
+*更新日期: 2026-04-20*
