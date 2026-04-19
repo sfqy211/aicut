@@ -63,21 +63,55 @@ export type SessionDetail = {
 export type Candidate = {
   id: number;
   session_id: number;
+  segment_id?: number | null;
   start_time: number;
   end_time: number;
   duration: number;
+  // 规则评分
+  rule_score: number;
+  score_danmaku: number;
+  score_interaction: number;
+  score_transcript: number;
+  score_energy: number;
+  // 最终评分
   score_total: number;
-  ai_summary?: string;
-  ai_title_suggestion?: string;
-  ai_reason?: string;
+  // LLM 结果
+  llm_score?: number | null;
+  llm_category?: string | null;
+  llm_confidence?: number | null;
+  llm_worth?: number | null;
+  llm_risk?: string | null;
+  // AI 推荐
+  ai_summary?: string | null;
+  ai_title_suggestion?: string | null;
+  ai_reason?: string | null;
+  ai_highlight?: string | null;
+  // 时间调整建议
+  suggested_trim_start: number;
+  suggested_trim_end: number;
+  // 审核状态
   status: "pending" | "approved" | "rejected";
+  user_note?: string | null;
+  // 关联信息
+  session_title?: string;
+  session_duration?: number;
+  created_at: number;
 };
 
 export type ExportJob = {
   id: number;
   session_id: number;
+  candidate_ids: string;
   output_path?: string;
   status: string;
   progress: number;
+  error_msg?: string | null;
   created_at: number;
+};
+
+export type ExportOptions = {
+  hardcodeSubtitles?: boolean;
+  hardcodeDanmaku?: boolean;
+  quality?: "original" | "1080p" | "720p";
+  format?: "mp4" | "webm";
 };
