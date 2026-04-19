@@ -6,7 +6,7 @@ import type { SessionStats } from "./stats.js";
 import type { RuleScore, WindowData } from "./rules.js";
 import { getKeywordMatches } from "./keywords.js";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
 
 export interface LLMResult {
   worth: boolean;

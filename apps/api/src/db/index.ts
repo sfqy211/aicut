@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import { config } from "../config.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export type Db = DatabaseSync;
 type NamedParams = Record<string, SQLInputValue>;
@@ -12,7 +15,7 @@ export function getDb(): Db {
   if (!db) {
     fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
     db = new DatabaseSync(config.dbPath);
-    const schemaPath = path.resolve("apps/api/src/db/schema.sql");
+    const schemaPath = path.join(__dirname, "schema.sql");
     db.exec(fs.readFileSync(schemaPath, "utf8"));
   }
 

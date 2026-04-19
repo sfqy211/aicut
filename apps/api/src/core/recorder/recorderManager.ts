@@ -15,7 +15,7 @@ import { libraryPaths } from "../library/index.js";
 import { getDb, row, rows } from "../../db/index.js";
 import { eventBus } from "../../events/bus.js";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
 
 type SourceRow = {
   id: number;
