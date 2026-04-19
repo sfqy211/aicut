@@ -52,6 +52,16 @@ let listenersBound = false;
 
 setFFMPEGPath(config.ffmpegPath);
 
+// 捕获弹幕客户端等未处理的错误，避免进程崩溃
+process.on("uncaughtException", (error) => {
+  console.error("[Recorder] Uncaught exception:", error.message);
+  // 不退出进程，允许录制器继续运行
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[Recorder] Unhandled rejection:", reason);
+});
+
 const manager = createRecorderManager<RecorderExtra>({
   providers: [bilibiliProvider],
   savePathRule: path.join(
