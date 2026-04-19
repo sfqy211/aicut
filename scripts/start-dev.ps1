@@ -20,9 +20,9 @@ if (-not $SkipCleanup) {
     foreach ($port in $ports) {
         $conn = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
         if ($conn) {
-            $pid = $conn.OwningProcess
-            Write-Host "  Killing process $pid on port $port" -ForegroundColor Yellow
-            Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+            $processId = $conn.OwningProcess
+            Write-Host "  Killing process $processId on port $port" -ForegroundColor Yellow
+            Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
         }
     }
     Start-Sleep -Milliseconds 500
