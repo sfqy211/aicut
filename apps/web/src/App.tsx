@@ -5,6 +5,7 @@ import { SystemRail } from "./components/SystemRail";
 import { Dashboard } from "./pages/Dashboard";
 import { Exports } from "./pages/Exports";
 import { Review } from "./pages/Review";
+import { Settings } from "./pages/Settings";
 import { Sessions } from "./pages/Sessions";
 import { Sources } from "./pages/Sources";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -31,6 +32,7 @@ function AppContent() {
           {page === "sessions" && <Sessions />}
           {page === "review" && <Review />}
           {page === "exports" && <Exports />}
+          {page === "settings" && <Settings />}
         </div>
       </section>
     </main>

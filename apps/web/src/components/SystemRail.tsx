@@ -1,4 +1,4 @@
-import { Activity, Database, Moon, Radio, Rows3, Sun, WandSparkles } from "lucide-react";
+import { Activity, Database, Moon, Radio, Rows3, Settings2, Sun, WandSparkles } from "lucide-react";
 import { useTheme } from "../contexts/ThemeContext";
 import { useSidebar } from "../contexts/SidebarContext";
 
@@ -13,6 +13,7 @@ const items = [
   { id: "sessions", label: "会话管理", icon: Rows3 },
   { id: "review", label: "切片审核", icon: WandSparkles },
   { id: "exports", label: "导出历史", icon: Database },
+  { id: "settings", label: "系统设置", icon: Settings2 },
 ];
 
 export function SystemRail({ activePage, onNavigate }: Props) {
