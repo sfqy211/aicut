@@ -228,7 +228,7 @@ export async function generateCandidates(sessionId: number): Promise<number> {
       @sessionId, @segmentId, @startTime, @endTime, @duration,
       @ruleScore, @scoreDanmaku, @scoreInteraction, @scoreKeyword, @scoreEnergy,
       @finalScore, @llmScore, @llmCategory, @llmConfidence, @llmWorth, @llmRisk,
-      @aiHighlight, @aiTitle, @aiReason, @aiHighlight2,
+      @aiSummary, @aiTitle, @aiReason, @aiHighlight,
       @suggestedTrimStart, @suggestedTrimEnd, 'pending'
     )`
   );
@@ -255,10 +255,10 @@ export async function generateCandidates(sessionId: number): Promise<number> {
         llmConfidence: candidate.llmResult?.confidence ?? null,
         llmWorth: candidate.llmResult?.worth ? 1 : 0,
         llmRisk: candidate.llmResult?.risk ?? null,
+        aiSummary: candidate.aiReason ?? candidate.aiHighlight,
         aiHighlight: candidate.aiHighlight,
         aiTitle: candidate.aiTitle,
         aiReason: candidate.aiReason,
-        aiHighlight2: candidate.aiHighlight,
         suggestedTrimStart: candidate.suggestedTrimStart,
         suggestedTrimEnd: candidate.suggestedTrimEnd,
       });
