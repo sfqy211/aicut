@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { config } from "../config.js";
@@ -11,7 +13,10 @@ import {
 } from "../core/analysis/index.js";
 import { updateRecorderFfmpegPath } from "../core/recorder/recorderManager.js";
 
+const execFileAsync = promisify(execFile);
+
 const llmConfigInput = z.object({
+  apiFormat: z.enum(["openai", "anthropic"]).optional(),
   baseUrl: z.string().url().optional(),
   apiKey: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
@@ -33,6 +38,7 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     }>;
 
     const result: Record<string, { value: string | null; updatedAt: number }> = {
+      llm_api_format: { value: "openai", updatedAt: 0 },
       llm_base_url: { value: null, updatedAt: 0 },
       llm_api_key: { value: null, updatedAt: 0 },
       llm_model: { value: null, updatedAt: 0 },
@@ -66,6 +72,11 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     const updates: string[] = [];
     const values: Record<string, string> = {};
 
+    if (input.apiFormat !== undefined) {
+      updates.push("llm_api_format = @apiFormat");
+      values.apiFormat = input.apiFormat;
+    }
+
     if (input.baseUrl !== undefined) {
       updates.push("llm_base_url = @baseUrl");
       values.baseUrl = input.baseUrl;
@@ -92,7 +103,18 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
       db.prepare(
         `INSERT INTO settings (key, value, updated_at) VALUES (@key, @value, @timestamp)
          ON CONFLICT(key) DO UPDATE SET value = @value, updated_at = @timestamp`
-      ).run({ key: key === "baseUrl" ? "llm_base_url" : key === "apiKey" ? "llm_api_key" : "llm_model", value: val, timestamp });
+      ).run({
+        key:
+          key === "apiFormat"
+            ? "llm_api_format"
+            : key === "baseUrl"
+              ? "llm_base_url"
+              : key === "apiKey"
+                ? "llm_api_key"
+                : "llm_model",
+        value: val,
+        timestamp,
+      });
     }
 
     return { updated: true, fields: Object.keys(values) };
@@ -136,6 +158,18 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         ffmpegPath: config.ffmpegPath,
         recorderSegment: config.recorderSegment,
       },
+    };
+  });
+
+  app.post("/settings/runtime/browse-ffmpeg", async (_request, reply) => {
+    const selectedPath = await browseForFfmpeg();
+    if (!selectedPath) {
+      return { selected: false, path: null };
+    }
+
+    return {
+      selected: true,
+      path: selectedPath,
     };
   });
 
@@ -223,4 +257,32 @@ function readDiskSpace(targetPath: string) {
       usagePercent: 0,
     };
   }
+}
+
+async function browseForFfmpeg(): Promise<string | null> {
+  if (process.platform !== "win32") {
+    throw new Error("Native ffmpeg file picker is only available on Windows");
+  }
+
+  const command = [
+    "Add-Type -AssemblyName System.Windows.Forms",
+    "$dialog = New-Object System.Windows.Forms.OpenFileDialog",
+    "$dialog.Title = '选择 ffmpeg.exe'",
+    "$dialog.Filter = 'FFmpeg executable (ffmpeg.exe)|ffmpeg.exe|Executable (*.exe)|*.exe'",
+    "$dialog.CheckFileExists = $true",
+    "$dialog.Multiselect = $false",
+    "$result = $dialog.ShowDialog()",
+    "if ($result -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.FileName }",
+  ].join("; ");
+
+  const { stdout } = await execFileAsync(
+    "powershell.exe",
+    ["-NoProfile", "-STA", "-Command", command],
+    {
+      windowsHide: false,
+    }
+  );
+
+  const selectedPath = stdout.trim();
+  return selectedPath || null;
 }
