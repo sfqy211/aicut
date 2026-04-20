@@ -96,6 +96,20 @@ export type Candidate = {
   session_title?: string;
   session_duration?: number;
   created_at: number;
+  updated_at?: number;
+};
+
+export type CandidateDetail = Candidate & {
+  segment_file_path?: string | null;
+  segment_start_offset?: number | null;
+  segment_duration?: number | null;
+  preview_start_time?: number;
+  preview_end_time?: number;
+  preview_duration?: number;
+  preview_padding?: number;
+  relative_clip_start?: number;
+  relative_clip_end?: number;
+  preview_url?: string;
 };
 
 export type ExportJob = {
@@ -114,4 +128,25 @@ export type ExportOptions = {
   hardcodeDanmaku?: boolean;
   quality?: "original" | "1080p" | "720p";
   format?: "mp4" | "webm";
+};
+
+export type SettingsMap = Record<string, { value: string | null; updatedAt: number }>;
+
+export type SystemSettings = {
+  sources: number;
+  sessions: number;
+  segments: number;
+  candidates: number;
+  exports: number;
+  pendingCandidates: number;
+  approvedCandidates: number;
+  ffmpegPath: string;
+  recorderSegment: string;
+  libraryRoot: string;
+  disk: {
+    totalBytes: number;
+    freeBytes: number;
+    usedBytes: number;
+    usagePercent: number;
+  };
 };
