@@ -98,6 +98,11 @@ export function getRecorderStatus(): RecorderStatus {
   };
 }
 
+export function updateRecorderFfmpegPath(nextPath: string) {
+  config.ffmpegPath = nextPath;
+  setFFMPEGPath(nextPath);
+}
+
 export function getSourceRuntime(sourceId: number): RuntimeStatus | null {
   return runtimeBySource.get(sourceId) ?? null;
 }

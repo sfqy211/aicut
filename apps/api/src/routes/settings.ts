@@ -1,5 +1,7 @@
+import fs from "node:fs";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
+import { config } from "../config.js";
 import { getDb, row } from "../db/index.js";
 import {
   getAllKeywords,
@@ -7,11 +9,17 @@ import {
   reloadKeywordsConfig,
   reloadPromptsConfig,
 } from "../core/analysis/index.js";
+import { updateRecorderFfmpegPath } from "../core/recorder/recorderManager.js";
 
 const llmConfigInput = z.object({
   baseUrl: z.string().url().optional(),
   apiKey: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
+});
+
+const runtimeConfigInput = z.object({
+  ffmpegPath: z.string().min(1).optional(),
+  recorderSegment: z.string().min(1).optional(),
 });
 
 export const settingsRoutes: FastifyPluginAsync = async (app) => {
@@ -28,6 +36,8 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
       llm_base_url: { value: null, updatedAt: 0 },
       llm_api_key: { value: null, updatedAt: 0 },
       llm_model: { value: null, updatedAt: 0 },
+      ffmpeg_path: { value: config.ffmpegPath, updatedAt: 0 },
+      recorder_segment: { value: config.recorderSegment, updatedAt: 0 },
     };
 
     for (const setting of settings) {
@@ -88,6 +98,47 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     return { updated: true, fields: Object.keys(values) };
   });
 
+  // 更新运行时配置
+  app.patch("/settings/runtime", async (request) => {
+    const input = runtimeConfigInput.parse(request.body);
+    const db = getDb();
+    const timestamp = Math.floor(Date.now() / 1000);
+    const updatedFields: string[] = [];
+
+    if (input.ffmpegPath !== undefined) {
+      db.prepare(
+        `INSERT INTO settings (key, value, updated_at) VALUES ('ffmpeg_path', @value, @timestamp)
+         ON CONFLICT(key) DO UPDATE SET value = @value, updated_at = @timestamp`
+      ).run({
+        value: input.ffmpegPath,
+        timestamp,
+      });
+      updateRecorderFfmpegPath(input.ffmpegPath);
+      updatedFields.push("ffmpegPath");
+    }
+
+    if (input.recorderSegment !== undefined) {
+      db.prepare(
+        `INSERT INTO settings (key, value, updated_at) VALUES ('recorder_segment', @value, @timestamp)
+         ON CONFLICT(key) DO UPDATE SET value = @value, updated_at = @timestamp`
+      ).run({
+        value: input.recorderSegment,
+        timestamp,
+      });
+      config.recorderSegment = input.recorderSegment;
+      updatedFields.push("recorderSegment");
+    }
+
+    return {
+      updated: updatedFields.length > 0,
+      fields: updatedFields,
+      effective: {
+        ffmpegPath: config.ffmpegPath,
+        recorderSegment: config.recorderSegment,
+      },
+    };
+  });
+
   // 获取关键词配置
   app.get("/settings/keywords", async () => {
     return getAllKeywords();
@@ -116,6 +167,7 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
   // 获取系统状态
   app.get("/settings/system", async () => {
     const db = getDb();
+    const disk = readDiskSpace(config.libraryRoot);
 
     const stats = {
       sources: row<{ count: number }>(
@@ -139,8 +191,36 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
       approvedCandidates: row<{ count: number }>(
         db.prepare("SELECT COUNT(*) AS count FROM candidates WHERE status = 'approved'")
       )?.count ?? 0,
+      ffmpegPath: config.ffmpegPath,
+      recorderSegment: config.recorderSegment,
+      libraryRoot: config.libraryRoot,
+      disk,
     };
 
     return stats;
   });
 };
+
+function readDiskSpace(targetPath: string) {
+  try {
+    const info = fs.statfsSync(targetPath);
+    const totalBytes = Number(info.blocks) * Number(info.bsize);
+    const freeBytes = Number(info.bavail) * Number(info.bsize);
+    const usedBytes = Math.max(0, totalBytes - freeBytes);
+    const usagePercent = totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 1000) / 10 : 0;
+
+    return {
+      totalBytes,
+      freeBytes,
+      usedBytes,
+      usagePercent,
+    };
+  } catch {
+    return {
+      totalBytes: 0,
+      freeBytes: 0,
+      usedBytes: 0,
+      usagePercent: 0,
+    };
+  }
+}

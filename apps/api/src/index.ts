@@ -4,8 +4,12 @@ import Fastify from "fastify";
 import { config } from "./config.js";
 import { restoreAsrQueue } from "./core/asr/client.js";
 import { ensureLibrary } from "./core/library/index.js";
-import { getRecorderStatus, restoreAutoRecorders } from "./core/recorder/recorderManager.js";
-import { getDb } from "./db/index.js";
+import {
+  getRecorderStatus,
+  restoreAutoRecorders,
+  updateRecorderFfmpegPath,
+} from "./core/recorder/recorderManager.js";
+import { getDb, row } from "./db/index.js";
 import { candidatesRoutes } from "./routes/candidates.js";
 import { eventsRoutes } from "./routes/events.js";
 import { exportsRoutes } from "./routes/exports.js";
@@ -16,7 +20,20 @@ import { sourcesRoutes } from "./routes/sources.js";
 
 export async function buildServer() {
   ensureLibrary();
-  getDb();
+  const db = getDb();
+  const persistedFfmpegPath = row<{ value: string }>(
+    db.prepare("SELECT value FROM settings WHERE key = 'ffmpeg_path'")
+  )?.value;
+  const persistedRecorderSegment = row<{ value: string }>(
+    db.prepare("SELECT value FROM settings WHERE key = 'recorder_segment'")
+  )?.value;
+
+  if (persistedFfmpegPath) {
+    updateRecorderFfmpegPath(persistedFfmpegPath);
+  }
+  if (persistedRecorderSegment) {
+    config.recorderSegment = persistedRecorderSegment;
+  }
 
   const app = Fastify({
     logger: {
