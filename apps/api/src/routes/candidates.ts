@@ -1,5 +1,9 @@
-import type { FastifyPluginAsync } from "fastify";
+import fs from "node:fs";
+import path from "node:path";
+import type { FastifyPluginAsync, FastifyReply } from "fastify";
 import { z } from "zod";
+import { config } from "../config.js";
+import { generatePreview } from "../core/export/ffmpeg.js";
 import { getDb, row, rows } from "../db/index.js";
 import { eventBus } from "../events/bus.js";
 
@@ -10,6 +14,25 @@ const reviewInput = z.object({
 const bulkApproveInput = z.object({
   ids: z.array(z.number().int().positive())
 });
+
+const previewQuery = z.object({
+  padding: z.coerce.number().int().min(0).max(30).default(12)
+});
+
+type CandidateMediaRow = {
+  id: number;
+  session_id: number;
+  start_time: number;
+  end_time: number;
+  duration: number;
+  created_at: number;
+  updated_at: number;
+  segment_file_path: string | null;
+  segment_start_offset: number | null;
+  segment_duration: number | null;
+  session_title?: string | null;
+  session_duration?: number | null;
+};
 
 export const candidatesRoutes: FastifyPluginAsync = async (app) => {
   // 获取候选列表（支持筛选）
@@ -68,7 +91,9 @@ export const candidatesRoutes: FastifyPluginAsync = async (app) => {
     const candidate = row(
       db.prepare(
         `SELECT c.*, s.title AS session_title, s.total_duration AS session_duration,
-                seg.file_path AS segment_file_path
+                seg.file_path AS segment_file_path,
+                seg.start_offset AS segment_start_offset,
+                seg.duration AS segment_duration
          FROM candidates c
          LEFT JOIN sessions s ON s.id = c.session_id
          LEFT JOIN segments seg ON seg.id = c.segment_id
@@ -78,7 +103,58 @@ export const candidatesRoutes: FastifyPluginAsync = async (app) => {
     );
 
     if (!candidate) return reply.notFound("Candidate not found");
-    return candidate;
+    return enrichCandidatePreview(candidate as CandidateMediaRow & Record<string, unknown>);
+  });
+
+  // 低码率候选预览
+  app.get("/candidates/:id/preview.mp4", async (request, reply) => {
+    const params = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
+    const query = previewQuery.parse(request.query ?? {});
+    const db = getDb();
+
+    const candidate = row<CandidateMediaRow>(
+      db.prepare(
+        `SELECT c.id, c.session_id, c.start_time, c.end_time, c.duration, c.created_at, c.updated_at,
+                c.session_id, c.start_time, c.end_time,
+                seg.file_path AS segment_file_path,
+                seg.start_offset AS segment_start_offset,
+                seg.duration AS segment_duration
+         FROM candidates c
+         LEFT JOIN segments seg ON seg.id = c.segment_id
+         WHERE c.id = ?`
+      ),
+      params.id
+    );
+
+    if (!candidate) return reply.notFound("Candidate not found");
+    if (!candidate.segment_file_path) return reply.notFound("Candidate media not found");
+    if (!fs.existsSync(candidate.segment_file_path)) {
+      return reply.notFound("Candidate source file missing");
+    }
+
+    const previewInfo = computePreviewWindow(candidate, query.padding);
+    const previewDir = path.join(config.libraryRoot, "previews");
+    fs.mkdirSync(previewDir, { recursive: true });
+
+    const previewName = [
+      `candidate_${candidate.id}`,
+      candidate.start_time,
+      candidate.end_time,
+      previewInfo.previewStart,
+      previewInfo.previewEnd
+    ].join("_");
+    const previewPath = path.join(previewDir, `${previewName}.mp4`);
+
+    if (!fs.existsSync(previewPath)) {
+      await generatePreview(
+        candidate.segment_file_path,
+        previewPath,
+        previewInfo.localPreviewStart,
+        previewInfo.previewDuration
+      );
+    }
+
+    return streamVideoFile(reply, previewPath);
   });
 
   // 批准候选
@@ -157,3 +233,80 @@ export const candidatesRoutes: FastifyPluginAsync = async (app) => {
     return { sessionId: params.sessionId, candidatesGenerated: count };
   });
 };
+
+function enrichCandidatePreview<T extends CandidateMediaRow & Record<string, unknown>>(candidate: T) {
+  const previewInfo = computePreviewWindow(candidate, 12);
+  return {
+    ...candidate,
+    preview_start_time: previewInfo.previewStart,
+    preview_end_time: previewInfo.previewEnd,
+    preview_duration: previewInfo.previewDuration,
+    preview_padding: 12,
+    relative_clip_start: previewInfo.relativeClipStart,
+    relative_clip_end: previewInfo.relativeClipEnd,
+    preview_url: `/api/candidates/${candidate.id}/preview.mp4?padding=12`
+  };
+}
+
+function computePreviewWindow(candidate: CandidateMediaRow, padding: number) {
+  const segmentStart = candidate.segment_start_offset ?? 0;
+  const relativeClipStart = Math.max(0, candidate.start_time - segmentStart);
+  const relativeClipEnd = Math.max(relativeClipStart + 1, candidate.end_time - segmentStart);
+  const segmentDuration = Math.max(
+    candidate.segment_duration ?? 0,
+    relativeClipEnd,
+    candidate.duration
+  );
+
+  const localPreviewStart = Math.max(0, relativeClipStart - padding);
+  const localPreviewEnd = Math.min(segmentDuration, relativeClipEnd + padding);
+  const previewDuration = Math.max(1, localPreviewEnd - localPreviewStart);
+  const previewStart = segmentStart + localPreviewStart;
+  const previewEnd = previewStart + previewDuration;
+
+  return {
+    segmentStart,
+    segmentDuration,
+    localPreviewStart,
+    localPreviewEnd,
+    previewStart,
+    previewEnd,
+    previewDuration,
+    relativeClipStart: candidate.start_time - previewStart,
+    relativeClipEnd: candidate.end_time - previewStart
+  };
+}
+
+async function streamVideoFile(
+  reply: FastifyReply,
+  filePath: string
+) {
+  const stat = fs.statSync(filePath);
+  const range = reply.request.headers.range;
+
+  reply.header("accept-ranges", "bytes");
+  reply.header("content-type", "video/mp4");
+  reply.header("cache-control", "private, max-age=300");
+
+  if (!range) {
+    reply.header("content-length", stat.size);
+    return reply.send(fs.createReadStream(filePath));
+  }
+
+  const match = /^bytes=(\d+)-(\d*)$/.exec(range);
+  if (!match) {
+    return reply.code(416).send("Invalid range");
+  }
+
+  const start = Number(match[1]);
+  const end = match[2] ? Number(match[2]) : stat.size - 1;
+
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || end >= stat.size) {
+    return reply.code(416).send("Range not satisfiable");
+  }
+
+  reply.code(206);
+  reply.header("content-range", `bytes ${start}-${end}/${stat.size}`);
+  reply.header("content-length", end - start + 1);
+  return reply.send(fs.createReadStream(filePath, { start, end }));
+}
