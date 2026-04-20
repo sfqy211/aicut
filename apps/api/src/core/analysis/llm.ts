@@ -23,6 +23,7 @@ export interface LLMResult {
 }
 
 export interface LLMConfig {
+  apiFormat: "openai" | "anthropic";
   baseUrl: string;
   apiKey: string;
   model: string;
@@ -145,6 +146,11 @@ export function reloadPromptsConfig(): void {
 // 获取 LLM 配置
 export function getLLMConfig(): LLMConfig | null {
   const db = getDb();
+  const apiFormat = row<{ value: string }>(
+    db.prepare("SELECT value FROM settings WHERE key = 'llm_api_format'"),
+    undefined
+  )?.value;
+
   const baseUrl = row<{ value: string }>(
     db.prepare("SELECT value FROM settings WHERE key = 'llm_base_url'"),
     undefined
@@ -163,6 +169,7 @@ export function getLLMConfig(): LLMConfig | null {
   if (!baseUrl || !apiKey) return null;
 
   return {
+    apiFormat: apiFormat === "anthropic" ? "anthropic" : "openai",
     baseUrl: baseUrl.replace(/\/$/, ""),
     apiKey,
     model: model ?? "gpt-4o-mini",
@@ -255,23 +262,21 @@ export async function scoreWithLLM(
       config.timeout ?? promptsConfig.settings.global.timeout
     );
 
-    const response = await fetch(`${config.baseUrl}/v1/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: config.model,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-        temperature: taskSettings.temperature,
-        max_tokens: taskSettings.maxTokens,
-      }),
-      signal: controller.signal,
-    });
+    const response = await fetch(
+      resolveLlmEndpoint(config),
+      {
+        method: "POST",
+        headers: buildLlmHeaders(config),
+        body: JSON.stringify(buildLlmPayload(config, {
+          system,
+          user,
+          model: config.model,
+          temperature: taskSettings.temperature,
+          maxTokens: taskSettings.maxTokens,
+        })),
+        signal: controller.signal,
+      }
+    );
 
     clearTimeout(timeoutId);
 
@@ -281,7 +286,7 @@ export async function scoreWithLLM(
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
+    const content = extractLlmText(config, data);
 
     if (!content) {
       console.error("LLM response missing content");
@@ -316,6 +321,106 @@ export async function scoreWithLLM(
     }
     return null;
   }
+}
+
+function resolveLlmEndpoint(config: LLMConfig): string {
+  if (config.apiFormat === "anthropic") {
+    if (config.baseUrl.endsWith("/messages")) {
+      return config.baseUrl;
+    }
+
+    if (config.baseUrl.endsWith("/v1")) {
+      return `${config.baseUrl}/messages`;
+    }
+
+    return `${config.baseUrl}/v1/messages`;
+  }
+
+  if (config.baseUrl.endsWith("/chat/completions")) {
+    return config.baseUrl;
+  }
+
+  if (config.baseUrl.endsWith("/v1")) {
+    return `${config.baseUrl}/chat/completions`;
+  }
+
+  return config.baseUrl.endsWith("/chat/completions")
+    ? config.baseUrl
+    : `${config.baseUrl}/v1/chat/completions`;
+}
+
+function buildLlmHeaders(config: LLMConfig): Record<string, string> {
+  if (config.apiFormat === "anthropic") {
+    return {
+      "Content-Type": "application/json",
+      "x-api-key": config.apiKey,
+      "anthropic-version": "2023-06-01",
+    };
+  }
+
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${config.apiKey}`,
+  };
+}
+
+function buildLlmPayload(
+  config: LLMConfig,
+  input: {
+    system: string;
+    user: string;
+    model: string;
+    temperature: number;
+    maxTokens: number;
+  }
+) {
+  if (config.apiFormat === "anthropic") {
+    return {
+      model: input.model,
+      system: input.system,
+      max_tokens: input.maxTokens,
+      temperature: normalizeMiniMaxTemperature(input.temperature),
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: input.user,
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  return {
+    model: input.model,
+    messages: [
+      { role: "system", content: input.system },
+      { role: "user", content: input.user },
+    ],
+    temperature: normalizeMiniMaxTemperature(input.temperature),
+    max_tokens: input.maxTokens,
+  };
+}
+
+function extractLlmText(config: LLMConfig, data: any): string | null {
+  if (config.apiFormat === "anthropic") {
+    const blocks = Array.isArray(data?.content) ? data.content : [];
+    return blocks
+      .filter((block: any) => block?.type === "text" && typeof block?.text === "string")
+      .map((block: any) => block.text)
+      .join("\n")
+      .trim() || null;
+  }
+
+  return data?.choices?.[0]?.message?.content ?? null;
+}
+
+function normalizeMiniMaxTemperature(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 1;
+  return Math.min(1, value);
 }
 
 // 计算最终评分
