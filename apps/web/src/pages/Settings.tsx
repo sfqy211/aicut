@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { apiGet, apiPatch } from "../api/client";
+import { apiGet, apiPatch, apiPost } from "../api/client";
 import type { SettingsMap, SystemSettings } from "../types";
 
 function formatBytes(bytes: number): string {
@@ -17,7 +17,7 @@ function formatBytes(bytes: number): string {
 export function Settings() {
   const [settings, setSettings] = useState<SettingsMap | null>(null);
   const [system, setSystem] = useState<SystemSettings | null>(null);
-  const [llmForm, setLlmForm] = useState({ baseUrl: "", apiKey: "", model: "" });
+  const [llmForm, setLlmForm] = useState({ apiFormat: "openai", baseUrl: "", apiKey: "", model: "" });
   const [runtimeForm, setRuntimeForm] = useState({ ffmpegPath: "", recorderSegment: "" });
   const [saving, setSaving] = useState<"llm" | "runtime" | null>(null);
 
@@ -30,6 +30,7 @@ export function Settings() {
     setSettings(nextSettings);
     setSystem(nextSystem);
     setLlmForm({
+      apiFormat: nextSettings.llm_api_format?.value === "anthropic" ? "anthropic" : "openai",
       baseUrl: nextSettings.llm_base_url?.value ?? "",
       apiKey: "",
       model: nextSettings.llm_model?.value ?? "",
@@ -48,6 +49,7 @@ export function Settings() {
     setSaving("llm");
     try {
       await apiPatch("/api/settings/llm", {
+        apiFormat: llmForm.apiFormat,
         baseUrl: llmForm.baseUrl || undefined,
         apiKey: llmForm.apiKey || undefined,
         model: llmForm.model || undefined,
@@ -71,6 +73,26 @@ export function Settings() {
     }
   }
 
+  async function chooseFfmpeg() {
+    const result = await apiPost<{ selected: boolean; path: string | null }>("/api/settings/runtime/browse-ffmpeg", {});
+    if (result.selected && result.path) {
+      setRuntimeForm((current) => ({ ...current, ffmpegPath: result.path ?? current.ffmpegPath }));
+    }
+  }
+
+  function applyMiniMaxPreset(mode: "openai" | "anthropic") {
+    const preset =
+      mode === "anthropic"
+        ? { apiFormat: "anthropic" as const, baseUrl: "https://api.minimaxi.com/anthropic" }
+        : { apiFormat: "openai" as const, baseUrl: "https://api.minimaxi.com/v1" };
+
+    setLlmForm((current) => ({
+      ...current,
+      ...preset,
+      model: current.model || "MiniMax-M2.7",
+    }));
+  }
+
   return (
     <div className="settings-layout">
       <section className="panel">
@@ -79,6 +101,25 @@ export function Settings() {
           <span className="tag">API READY</span>
         </div>
         <div className="panel-body settings-stack">
+          <div className="settings-presets">
+            <button className="btn btn-sm" onClick={() => applyMiniMaxPreset("openai")}>
+              MiniMax OpenAI 兼容
+            </button>
+            <button className="btn btn-sm" onClick={() => applyMiniMaxPreset("anthropic")}>
+              MiniMax Anthropic 兼容
+            </button>
+          </div>
+          <label className="form-group">
+            <span className="form-label">接口协议</span>
+            <select
+              className="form-input"
+              value={llmForm.apiFormat}
+              onChange={(event) => setLlmForm((current) => ({ ...current, apiFormat: event.target.value as "openai" | "anthropic" }))}
+            >
+              <option value="openai">OpenAI API 兼容</option>
+              <option value="anthropic">Anthropic API 兼容</option>
+            </select>
+          </label>
           <label className="form-group">
             <span className="form-label">API URL</span>
             <input
@@ -104,9 +145,12 @@ export function Settings() {
               className="form-input"
               value={llmForm.model}
               onChange={(event) => setLlmForm((current) => ({ ...current, model: event.target.value }))}
-              placeholder="gpt-4o-mini / claude-compatible"
+              placeholder="MiniMax-M2.7 / gpt-4o-mini / claude-model"
             />
           </label>
+          <div className="settings-hint">
+            OpenAI 兼容填写 `https://api.minimaxi.com/v1`，Anthropic 兼容填写 `https://api.minimaxi.com/anthropic`。
+          </div>
           <div className="settings-actions">
             <button className="btn btn-primary" onClick={saveLlm} disabled={saving === "llm"}>
               {saving === "llm" ? "保存中..." : "保存 LLM 配置"}
@@ -124,12 +168,17 @@ export function Settings() {
         <div className="panel-body settings-stack">
           <label className="form-group">
             <span className="form-label">FFmpeg 路径</span>
-            <input
-              className="form-input"
-              value={runtimeForm.ffmpegPath}
-              onChange={(event) => setRuntimeForm((current) => ({ ...current, ffmpegPath: event.target.value }))}
-              placeholder="ffmpeg 或绝对路径"
-            />
+            <div className="settings-inline">
+              <input
+                className="form-input"
+                value={runtimeForm.ffmpegPath}
+                placeholder="请选择 ffmpeg.exe"
+                readOnly
+              />
+              <button className="btn btn-sm" onClick={chooseFfmpeg}>
+                选择 ffmpeg.exe
+              </button>
+            </div>
           </label>
           <label className="form-group">
             <span className="form-label">录制分段时长</span>
