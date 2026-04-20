@@ -23,14 +23,7 @@ function AppContent() {
           </button>
           <h1 className="topbar-title">
             AICut 运营控制台
-            <span className="mono">REC-ANALYZE-REVIEW</span>
           </h1>
-          <div className="topbar-actions">
-            <div className="live-indicator">
-              <span className="status-dot"></span>
-              <span className="mono">LIVE DATA</span>
-            </div>
-          </div>
         </header>
         <div className="content">
           {page === "dashboard" && <Dashboard />}
@@ -39,23 +32,6 @@ function AppContent() {
           {page === "review" && <Review />}
           {page === "exports" && <Exports />}
         </div>
-        <footer className="footer">
-          <div className="footer-status">
-            <span className="footer-status-item">
-              <span className="status-dot"></span>
-              <span className="mono">SYSTEM ONLINE</span>
-            </span>
-            <span className="footer-status-item">
-              <span className="status-dot"></span>
-              <span className="mono">DB_CONN_OK</span>
-            </span>
-            <span className="footer-status-item">
-              <span className="status-dot"></span>
-              <span className="mono">SSE_STREAM_ACTIVE</span>
-            </span>
-          </div>
-          <div className="mono">AICut Console v1.0.0</div>
-        </footer>
       </section>
     </main>
   );

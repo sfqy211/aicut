@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -5,9 +7,6 @@
 /* ============================================
    AICut Console - Tech Control Center Style
    ============================================ */
-
-/* Fonts */
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
 
 /* CSS Variables - Theme System */
 :root {
@@ -106,14 +105,20 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   height: 56px;
   display: flex;
   align-items: center;
+  justify-content: center;
   padding: 0 20px;
   border-bottom: 1px solid var(--border);
   gap: 12px;
 }
 
+.sidebar.collapsed .brand {
+  padding: 0;
+}
+
 .brand-icon {
   width: 28px;
   height: 28px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -257,26 +262,6 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   align-items: center;
   gap: 8px;
   flex: 1;
-}
-
-.topbar-title .mono {
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--text-secondary);
-}
-
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.live-indicator {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--text-secondary);
 }
 
 /* Content Area */
@@ -755,30 +740,6 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 }
 
 .heat-strip-fill { height: 100%; background: var(--accent); }
-
-/* Footer */
-.footer {
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 24px;
-  background: var(--bg-secondary);
-  border-top: 1px solid var(--border);
-  font-size: 10px;
-  color: var(--text-secondary);
-}
-
-.footer-status {
-  display: flex;
-  gap: 24px;
-}
-
-.footer-status-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
 
 /* Reveal Animation */
 .reveal {
