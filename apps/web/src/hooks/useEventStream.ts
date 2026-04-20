@@ -13,7 +13,11 @@ export function useEventStream() {
     events.addEventListener("import.created", handler);
     events.addEventListener("candidate.approved", handler);
     events.addEventListener("candidate.rejected", handler);
+    events.addEventListener("candidates.generated", handler);
     events.addEventListener("export.created", handler);
+    events.addEventListener("export.progress", handler);
+    events.addEventListener("export.completed", handler);
+    events.addEventListener("export.failed", handler);
     events.addEventListener("source.monitoring_started", handler);
     events.addEventListener("source.monitoring_stopped", handler);
     events.addEventListener("source.recording_started", handler);
