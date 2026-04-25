@@ -75,7 +75,7 @@ Start-Sleep -Milliseconds 300
 
 # 启动 ASR
 $asrDir = Join-Path $ProjectDir "services\asr-worker"
-Start-ServiceWindow -Title "AICut-ASR" -Command "Set-Location '$asrDir'; `$env:AICUT_ASR_ALLOW_STUB='1'; $AsrVenv main.py"
+Start-ServiceWindow -Title "AICut-ASR" -Command "Set-Location '$asrDir'; $AsrVenv main.py"
 
 Write-Host "`nAll services started in separate windows." -ForegroundColor Green
 Write-Host "  API: http://127.0.0.1:43110"

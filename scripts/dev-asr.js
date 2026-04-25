@@ -2,8 +2,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 
 /**
- * 单独启动 ASR Worker
- * 支持设置环境变量 AICUT_ASR_ALLOW_STUB=1 进行 stub 模式测试
+ * 单独启动 ASR Worker (V2 - SenseVoice)
  */
 const asrDir = path.resolve("services/asr-worker");
 const python = process.env.AICUT_PYTHON || "python";
@@ -14,10 +13,7 @@ console.log(`  Python: ${python}`);
 
 const child = spawn(python, ["main.py"], {
   cwd: asrDir,
-  env: {
-    ...process.env,
-    AICUT_ASR_ALLOW_STUB: process.env.AICUT_ASR_ALLOW_STUB ?? "1",
-  },
+  env: { ...process.env },
   stdio: "inherit",
 });
 

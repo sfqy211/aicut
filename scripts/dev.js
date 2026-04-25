@@ -17,7 +17,7 @@ const processes = [
     command: process.env.AICUT_PYTHON || "python",
     args: ["main.py"],
     cwd: path.resolve("services/asr-worker"),
-    env: { ...process.env, AICUT_ASR_ALLOW_STUB: process.env.AICUT_ASR_ALLOW_STUB ?? "1" },
+    env: { ...process.env },
   },
 ];
 
