@@ -44,13 +44,16 @@ CREATE TABLE IF NOT EXISTS segments (
 
 CREATE TABLE IF NOT EXISTS transcripts (
   id INTEGER PRIMARY KEY,
-  segment_id INTEGER NOT NULL REFERENCES segments(id) ON DELETE CASCADE,
-  language TEXT NOT NULL DEFAULT 'zh',
+  session_id INTEGER REFERENCES sessions(id) ON DELETE CASCADE,
+  segment_id INTEGER REFERENCES segments(id) ON DELETE CASCADE,
+  language TEXT NOT NULL DEFAULT 'auto',
   full_text TEXT,
   words_json TEXT,
   segments_json TEXT,
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
+
+CREATE INDEX IF NOT EXISTS idx_transcripts_session_id ON transcripts(session_id);
 
 CREATE TABLE IF NOT EXISTS danmaku_events (
   id INTEGER PRIMARY KEY,

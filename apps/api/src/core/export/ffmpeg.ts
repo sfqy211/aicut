@@ -370,29 +370,42 @@ export async function processExportTask(exportId: number): Promise<void> {
 
     // 生成字幕（如果有转写）
     const transcriptSegments: Array<{ start: number; end: number; text: string }> = [];
-    for (const candidate of candidates) {
-      if (candidate.segment_id) {
-        const transcript = row<{ segments_json: string | null }>(
-          db.prepare("SELECT segments_json FROM transcripts WHERE segment_id = ?"),
-          candidate.segment_id
-        );
 
-        if (transcript?.segments_json) {
-          const segments = JSON.parse(transcript.segments_json) as Array<{
-            start: number;
-            end: number;
-            text: string;
-          }>;
+    // V2: 从 session 级 transcripts 获取，再按候选时间范围过滤
+    const sessionTranscript = row<{ segments_json: string | null }>(
+      db.prepare("SELECT segments_json FROM transcripts WHERE session_id = ?"),
+      exportJob.session_id
+    );
 
-          // 过滤出候选时间范围内的转写
-          for (const seg of segments) {
-            const absStart = candidate.start_time + seg.start;
-            if (absStart >= candidate.start_time && absStart < candidate.end_time) {
-              transcriptSegments.push(seg);
-            }
+    if (sessionTranscript?.segments_json) {
+      const allSegments = JSON.parse(sessionTranscript.segments_json) as Array<{
+        start: number;
+        end: number;
+        text: string;
+      }>;
+
+      for (const candidate of candidates) {
+        // 过滤出候选时间范围内的转写（全局时间戳）
+        for (const seg of allSegments) {
+          if (seg.start >= candidate.start_time && seg.end <= candidate.end_time) {
+            transcriptSegments.push(seg);
           }
         }
       }
+
+      // 去重并排序
+      const seen = new Set<string>();
+      const uniqueSegments: typeof transcriptSegments = [];
+      for (const seg of transcriptSegments) {
+        const key = `${seg.start.toFixed(2)}_${seg.end.toFixed(2)}_${seg.text}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          uniqueSegments.push(seg);
+        }
+      }
+      uniqueSegments.sort((a, b) => a.start - b.start);
+      transcriptSegments.length = 0;
+      transcriptSegments.push(...uniqueSegments);
     }
 
     if (transcriptSegments.length > 0) {

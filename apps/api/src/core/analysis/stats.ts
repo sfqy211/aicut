@@ -117,9 +117,8 @@ export function computeSessionStats(sessionId: number): SessionStats {
   // 获取转写 segments 计算能量分布
   const transcripts = rows<{ segments_json: string | null }>(
     db.prepare(
-      `SELECT segments_json FROM transcripts t
-       JOIN segments s ON s.id = t.segment_id
-       WHERE s.session_id = ? AND t.segments_json IS NOT NULL`
+      `SELECT segments_json FROM transcripts
+       WHERE session_id = ? AND segments_json IS NOT NULL`
     ),
     sessionId
   );
@@ -357,9 +356,8 @@ export function getWindowData(
   // 获取窗口内的转写文本
   const transcripts = rows<{ full_text: string | null }>(
     db.prepare(
-      `SELECT t.full_text FROM transcripts t
-       JOIN segments s ON s.id = t.segment_id
-       WHERE s.session_id = ? AND t.full_text IS NOT NULL`
+      `SELECT full_text FROM transcripts
+       WHERE session_id = ? AND full_text IS NOT NULL`
     ),
     sessionId
   );

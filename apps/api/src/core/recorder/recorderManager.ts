@@ -9,11 +9,14 @@ import {
   type SerializedRecorder
 } from "@bililive-tools/manager";
 import { config } from "../../config.js";
-import { enqueueAsrTask } from "../asr/client.js";
 import { findDanmakuSidecar, importDanmakuForSegment } from "../danmaku/parser.js";
 import { libraryPaths } from "../library/index.js";
 import { getDb, row, rows } from "../../db/index.js";
 import { eventBus } from "../../events/bus.js";
+import { addSegment, endSessionManifest, getSegmentDuration } from "../hls/index.js";
+import { getAudioStreamUrl } from "../bilibili/streamUrl.js";
+import { startAsrStream, stopAsrStream } from "../asr/streamClient.js";
+import { tryGenerateCandidates } from "../analysis/scoring.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
 
@@ -48,6 +51,7 @@ type RecorderExtra = { sourceId?: number };
 const recorderIdBySource = new Map<number, string>();
 const activeSessionBySource = new Map<number, number>();
 const runtimeBySource = new Map<number, RuntimeStatus>();
+const sessionStartTimeBySource = new Map<number, number>();
 let listenersBound = false;
 
 setFFMPEGPath(config.ffmpegPath);
@@ -138,7 +142,7 @@ export async function startRecorder(sourceId: number): Promise<RuntimeStatus> {
     quality: 10000,
     streamPriorities: [],
     sourcePriorities: [],
-    segment: config.recorderSegment,
+    segment: "2",
     saveGiftDanma: true,
     saveSCDanma: true,
     saveCover: true,
@@ -147,7 +151,7 @@ export async function startRecorder(sourceId: number): Promise<RuntimeStatus> {
     uid: cookie.uid,
     useServerTimestamp: true,
     recorderType: "ffmpeg",
-    videoFormat: "auto",
+    videoFormat: "ts",
     formatName: "auto",
     codecName: "auto",
     extra: { sourceId }
@@ -206,6 +210,8 @@ function bindManagerEvents() {
     const sourceId = getSourceIdFromRecorder(recorder);
     if (!sourceId) return;
     const sessionId = ensureActiveSession(sourceId, recorder);
+    const startTime = Date.now();
+    sessionStartTimeBySource.set(sourceId, startTime);
     console.log(`[Recorder] RecordStart: source ${sourceId}, session ${sessionId}, path: ${recordHandle.savePath}`);
     setRuntime(sourceId, recorder.id, {
       state: "recording",
@@ -213,7 +219,24 @@ function bindManagerEvents() {
       sessionId,
       progressTime: recordHandle.progress?.time ?? null
     });
-    eventBus.publish("source.recording_started", { sourceId, sessionId, savePath: recordHandle.savePath });
+    eventBus.publish("source.recording_started", { sourceId, sessionId, savePath: recordHandle.savePath, startTime });
+
+    // 启动流式 ASR
+    void (async () => {
+      try {
+        const source = getSource(sourceId);
+        if (!source) return;
+        const cookie = readCookie(source.cookie);
+        const streamUrl = await getAudioStreamUrl(source.room_id, cookie.auth);
+        await startAsrStream(sessionId, streamUrl, startTime);
+        console.log(`[ASR] Stream started for session ${sessionId}`);
+        eventBus.publish("session.transcription_live", { sessionId, status: "started" });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`[ASR] Failed to start stream for session ${sessionId}: ${message}`);
+        eventBus.publish("session.transcription_failed", { sessionId, error: message });
+      }
+    })();
   });
 
   manager.on("RecordStop", ({ recorder }) => {
@@ -225,8 +248,46 @@ function bindManagerEvents() {
       getDb()
         .prepare("UPDATE sessions SET status = 'processing', end_time = unixepoch(), updated_at = unixepoch() WHERE id = ?")
         .run(sessionId);
+      // V2: segments 不再用于 ASR 状态追踪，全部标记为 ready
+      getDb()
+        .prepare("UPDATE segments SET status = 'ready', updated_at = unixepoch() WHERE session_id = ?")
+        .run(sessionId);
+      endSessionManifest(sessionId);
+
+      // 停止 ASR 流并入库
+      void (async () => {
+        try {
+          const segments = await stopAsrStream(sessionId);
+          console.log(`[ASR] Stream stopped for session ${sessionId}, segments=${segments.length}`);
+
+          const fullText = segments.map((s) => s.text).join(" ");
+          getDb()
+            .prepare(
+              `INSERT INTO transcripts (session_id, language, full_text, segments_json)
+               VALUES (@sessionId, @language, @fullText, @segmentsJson)`
+            )
+            .run({
+              sessionId,
+              language: "auto",
+              fullText,
+              segmentsJson: JSON.stringify(segments),
+            });
+
+          eventBus.publish("session.transcription_completed", { sessionId, segmentCount: segments.length });
+
+          // 触发候选生成
+          void tryGenerateCandidates(sessionId).catch((err) => {
+            console.error(`[Analysis] Failed to generate candidates for session ${sessionId}:`, err);
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`[ASR] Failed to stop stream for session ${sessionId}: ${message}`);
+          eventBus.publish("session.transcription_failed", { sessionId, error: message });
+        }
+      })();
     }
     activeSessionBySource.delete(sourceId);
+    sessionStartTimeBySource.delete(sourceId);
     setRuntime(sourceId, recorder.id, { state: "monitoring", sessionId: null, progressTime: null });
     eventBus.publish("source.recording_stopped", { sourceId, sessionId: sessionId ?? null });
   });
@@ -238,6 +299,16 @@ function bindManagerEvents() {
     eventBus.publish("source.recorder_progress", { sourceId, progress });
   });
 
+  manager.on("videoFileCreated", async ({ recorder, filename }) => {
+    const sourceId = getSourceIdFromRecorder(recorder);
+    if (!sourceId) return;
+    const sessionId = activeSessionBySource.get(sourceId);
+    if (sessionId) {
+      const duration = await getSegmentDuration(filename);
+      addSegment(sessionId, filename, duration);
+    }
+  });
+
   manager.on("videoFileCompleted", ({ recorder, filename }) => {
     const sourceId = getSourceIdFromRecorder(recorder);
     if (!sourceId) return;
@@ -245,7 +316,7 @@ function bindManagerEvents() {
     try {
       const segmentId = createSegmentFromVideo(sourceId, recorder, filename);
       eventBus.publish("segment.created", { sourceId, segmentId, filePath: filename });
-      enqueueAsrTask(segmentId);
+      // V2: 流式 ASR 不再按 segment 排队，由 session 级流处理
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`[Recorder] VideoFileCompleted error: ${message}`);
