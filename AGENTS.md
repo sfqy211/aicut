@@ -9,6 +9,7 @@ AICut 项目的 AI 助手上下文索引。
 | [docs/design-context.md](docs/design-context.md) | 设计上下文：用户画像、品牌调性、美学方向、设计原则 |
 | [docs/AICut-V1-方案.md](docs/AICut-V1-方案.md) | 项目完整方案：阶段规划、数据模型、API 设计、UI 原型 |
 | [docs/scoring-algorithm.md](docs/scoring-algorithm.md) | 评分算法：动态阈值、维度权重、LLM 增强 |
+| [AICut V2 重构计划文档.md](AICut%20V2%20重构计划文档.md) | V2 重构计划：流式 ASR、HLS DVR、SenseVoice |
 
 ## 设计上下文概要
 

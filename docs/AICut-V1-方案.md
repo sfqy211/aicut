@@ -30,7 +30,7 @@
 | 后端     | Node.js + Fastify + TypeScript       | bililive-tools 同生态，事件驱动友好      |
 | 数据库   | SQLite (better-sqlite3)              | 零配置，单文件备份                       |
 | 录制     | @bililive-tools/manager              | 成熟 B站录制器，分段事件完善             |
-| ASR      | Python + faster-whisper (CPU)        | 本地优先，small 模型 2GB 内存            |
+| ASR      | Python + SenseVoice-Small (FunASR)   | 本地优先，流式识别，CPU int8              |
 | 媒体处理 | FFmpeg                               | 抽音频、截图、预览代理                   |
 | LLM      | OpenAI 兼容 API                      | 用户已有 Key，支持 GPT/Claude/第三方代理 |
 
@@ -80,7 +80,9 @@ aicut/
 ├── services/
 │   └── asr-worker/          # Python ASR 服务
 │       ├── main.py          # FastAPI 服务入口
-│       ├── whisper_worker.py # 转写逻辑
+│       ├── sensevoice_worker.py # 转写逻辑（文件模式）
+│       ├── stream_worker.py    # 流式识别逻辑
+│       ├── stream_manager.py   # 多流管理
 │       ├── config.py        # 模型配置
 │       └── requirements.txt
 │
