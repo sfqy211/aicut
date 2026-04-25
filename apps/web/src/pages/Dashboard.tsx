@@ -116,7 +116,7 @@ export function Dashboard() {
                   <tr key={session.id}>
                     <td>{session.title || `Session #${session.id}`}</td>
                     <td>
-                      <span className="tag">{session.session_type === "live" ? "直播" : "导入"}</span>
+                      <span className="tag">直播</span>
                     </td>
                     <td className="text-muted">{session.status}</td>
                   </tr>

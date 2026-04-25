@@ -28,6 +28,9 @@ export function useEventStream() {
     events.addEventListener("segment.transcription_completed", handler);
     events.addEventListener("segment.transcription_failed", handler);
     events.addEventListener("segment.danmaku_imported", handler);
+    events.addEventListener("session.transcription_live", handler);
+    events.addEventListener("session.transcription_completed", handler);
+    events.addEventListener("session.transcription_failed", handler);
 
     return () => events.close();
   }, []);

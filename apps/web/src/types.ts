@@ -130,6 +130,19 @@ export type ExportOptions = {
   format?: "mp4" | "webm";
 };
 
+export type LiveTranscriptChunk = {
+  start: number;
+  end: number;
+  text: string;
+  isPartial?: boolean;
+};
+
+export type SessionTranscript = {
+  sessionId: number;
+  segments: LiveTranscriptChunk[];
+  status: "recording" | "completed" | "error";
+};
+
 export type SettingsMap = Record<string, { value: string | null; updatedAt: number }>;
 
 export type SystemSettings = {
