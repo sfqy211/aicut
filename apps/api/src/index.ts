@@ -2,7 +2,6 @@ import cors from "@fastify/cors";
 import sensible from "@fastify/sensible";
 import Fastify from "fastify";
 import { config } from "./config.js";
-import { restoreAsrQueue } from "./core/asr/client.js";
 import { ensureLibrary } from "./core/library/index.js";
 import {
   getRecorderStatus,
@@ -13,7 +12,7 @@ import { getDb, row } from "./db/index.js";
 import { candidatesRoutes } from "./routes/candidates.js";
 import { eventsRoutes } from "./routes/events.js";
 import { exportsRoutes } from "./routes/exports.js";
-import { importsRoutes } from "./routes/imports.js";
+import { hlsRoutes } from "./core/hls/index.js";
 import { sessionsRoutes } from "./routes/sessions.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { sourcesRoutes } from "./routes/sources.js";
@@ -51,7 +50,7 @@ export async function buildServer() {
   }));
 
   await app.register(sourcesRoutes, { prefix: "/api" });
-  await app.register(importsRoutes, { prefix: "/api" });
+  await app.register(hlsRoutes, { prefix: "/api" });
   await app.register(sessionsRoutes, { prefix: "/api" });
   await app.register(candidatesRoutes, { prefix: "/api" });
   await app.register(exportsRoutes, { prefix: "/api" });
@@ -60,7 +59,6 @@ export async function buildServer() {
 
   app.addHook("onReady", async () => {
     await restoreAutoRecorders();
-    restoreAsrQueue();
   });
 
   return app;
