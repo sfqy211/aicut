@@ -1,51 +1,46 @@
 import { spawn } from "node:child_process";
 import { config } from "../../config.js";
+import { getPlaylist, generateM3u8 as generateFromPlaylist } from "../recorder/playlist.js";
 
-type SegmentInfo = {
+export type SegmentInfo = {
   id: string;
   filePath: string;
   duration: number; // seconds
 };
 
-type SessionManifest = {
+export type SessionManifest = {
   sessionId: number;
   segments: SegmentInfo[];
   ended: boolean;
 };
 
-const manifests = new Map<number, SessionManifest>();
-
-export function ensureSessionManifest(sessionId: number): SessionManifest {
-  let manifest = manifests.get(sessionId);
-  if (!manifest) {
-    manifest = { sessionId, segments: [], ended: false };
-    manifests.set(sessionId, manifest);
-  }
-  return manifest;
-}
-
-export function addSegment(sessionId: number, filePath: string, duration: number): SegmentInfo {
-  const manifest = ensureSessionManifest(sessionId);
-  const segment: SegmentInfo = {
-    id: `seg_${manifest.segments.length + 1}`,
-    filePath,
-    duration,
-  };
-  manifest.segments.push(segment);
-  return segment;
-}
-
-export function endSessionManifest(sessionId: number): void {
-  const manifest = manifests.get(sessionId);
-  if (manifest) {
-    manifest.ended = true;
-  }
-}
-
+/**
+ * 从 playlist 获取 session manifest（只读适配层）
+ */
 export function getManifest(sessionId: number): SessionManifest | undefined {
-  return manifests.get(sessionId);
+  const playlist = getPlaylist(sessionId);
+  if (!playlist) return undefined;
+  return {
+    sessionId,
+    segments: playlist.segments.map((s) => ({
+      id: `seq_${s.sequence}`,
+      filePath: s.filePath,
+      duration: s.duration,
+    })),
+    ended: playlist.ended,
+  };
 }
 
+/**
+ * 生成 m3u8 文本（委托给 playlist 模块）
+ */
+export function generateM3u8(sessionId: number): string {
+  return generateFromPlaylist(sessionId);
+}
+
+/**
+ * 使用 ffprobe 探测 segment 时长
+ */
 export async function getSegmentDuration(filePath: string): Promise<number> {
   return new Promise((resolve) => {
     const ffprobePath = config.ffmpegPath.replace(/ffmpeg/i, "ffprobe");
@@ -66,27 +61,19 @@ export async function getSegmentDuration(filePath: string): Promise<number> {
   });
 }
 
-export function generateM3u8(sessionId: number): string {
-  const manifest = manifests.get(sessionId);
-  if (!manifest) {
-    throw new Error(`Session ${sessionId} not found`);
-  }
+// --- 兼容旧接口（不再维护独立内存结构）---
 
-  const lines: string[] = [
-    "#EXTM3U",
-    "#EXT-X-VERSION:6",
-    "#EXT-X-PLAYLIST-TYPE:EVENT",
-    "#EXT-X-TARGETDURATION:120",
-  ];
+export function ensureSessionManifest(sessionId: number): SessionManifest {
+  return getManifest(sessionId) ?? { sessionId, segments: [], ended: false };
+}
 
-  for (const seg of manifest.segments) {
-    lines.push(`#EXTINF:${seg.duration.toFixed(3)},`);
-    lines.push(`/api/sessions/${sessionId}/hls/${seg.id}.ts`);
-  }
+export function addSegment(sessionId: number, filePath: string, duration: number): SegmentInfo {
+  // 旧接口保留，但不再维护独立的 manifests Map
+  // 新录制逻辑已迁移到 recorder/playlist.ts
+  return { id: "legacy", filePath, duration };
+}
 
-  if (manifest.ended) {
-    lines.push("#EXT-X-ENDLIST");
-  }
-
-  return lines.join("\n") + "\n";
+export function endSessionManifest(sessionId: number): void {
+  // 空实现，结束逻辑由 playlist.ts 处理
+  void sessionId;
 }

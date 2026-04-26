@@ -311,10 +311,8 @@ export async function processExportTask(exportId: number): Promise<void> {
   // 获取候选片段信息
   const candidates = db
     .prepare(
-      `SELECT c.id, c.start_time, c.end_time, c.duration, c.segment_id,
-              seg.file_path AS segment_file_path
+      `SELECT c.id, c.start_time, c.end_time, c.duration
        FROM candidates c
-       LEFT JOIN segments seg ON seg.id = c.segment_id
        WHERE c.id IN (${candidateIds.map(() => "?").join(",")})
        ORDER BY c.start_time ASC`
     )
@@ -323,12 +321,26 @@ export async function processExportTask(exportId: number): Promise<void> {
     start_time: number;
     end_time: number;
     duration: number;
-    segment_id: number | null;
-    segment_file_path: string | null;
   }>;
 
   if (candidates.length === 0) {
     throw new Error("No valid candidates found");
+  }
+
+  // 获取 session 的所有 segments（用于跨 segment 裁剪）
+  const sessionSegments = db
+    .prepare(
+      `SELECT file_path, start_offset, duration FROM segments
+       WHERE session_id = ? ORDER BY start_offset ASC`
+    )
+    .all(exportJob.session_id) as Array<{
+    file_path: string;
+    start_offset: number;
+    duration: number;
+  }>;
+
+  if (sessionSegments.length === 0) {
+    throw new Error("No segments found for session");
   }
 
   // 确定输出路径
@@ -342,14 +354,26 @@ export async function processExportTask(exportId: number): Promise<void> {
   const format = options.format ?? "mp4";
   const outputPath = path.join(sessionDir, `${baseName}.${format}`);
 
-  // 准备片段
-  const clips = candidates
-    .filter((c) => c.segment_file_path)
-    .map((c) => ({
-      inputPath: c.segment_file_path!,
-      startSeconds: c.start_time,
-      durationSeconds: c.duration,
-    }));
+  // 为每个候选生成 clip 列表（支持跨 segment）
+  const clips: Array<{ inputPath: string; startSeconds: number; durationSeconds: number }> = [];
+  for (const candidate of candidates) {
+    for (const seg of sessionSegments) {
+      const segStart = seg.start_offset;
+      const segEnd = segStart + seg.duration;
+      // 检查重叠
+      if (candidate.end_time <= segStart || candidate.start_time >= segEnd) continue;
+      const clipStart = Math.max(0, candidate.start_time - segStart);
+      const clipEnd = Math.min(seg.duration, candidate.end_time - segStart);
+      const clipDuration = clipEnd - clipStart;
+      if (clipDuration > 0) {
+        clips.push({
+          inputPath: seg.file_path,
+          startSeconds: clipStart,
+          durationSeconds: clipDuration,
+        });
+      }
+    }
+  }
 
   // 更新状态
   db.prepare("UPDATE exports SET status = 'processing', output_path = ? WHERE id = ?").run(

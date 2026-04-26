@@ -17,9 +17,6 @@ importers:
       '@bililive-tools/bilibili-recorder':
         specifier: ^1.15.0
         version: 1.15.0
-      '@bililive-tools/manager':
-        specifier: ^1.14.1
-        version: 1.14.1
       '@fastify/cors':
         specifier: ^10.0.1
         version: 10.1.0

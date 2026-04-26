@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@bililive-tools/bilibili-recorder": "^1.15.0",
-    "@bililive-tools/manager": "^1.14.1",
     "@fastify/cors": "^10.0.1",
     "@fastify/sensible": "^6.0.3",
     "dotenv": "^16.4.7",
