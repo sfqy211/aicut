@@ -8,7 +8,6 @@ type Props = {
 };
 
 const items = [
-  { id: "dashboard", label: "数据看板", icon: Activity },
   { id: "sources", label: "直播源", icon: Radio },
   { id: "sessions", label: "会话管理", icon: Rows3 },
   { id: "review", label: "切片审核", icon: WandSparkles },

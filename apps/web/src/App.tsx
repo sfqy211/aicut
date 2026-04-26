@@ -2,7 +2,6 @@ import { useState } from "react";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { SidebarProvider, useSidebar } from "./contexts/SidebarContext";
 import { SystemRail } from "./components/SystemRail";
-import { Dashboard } from "./pages/Dashboard";
 import { Exports } from "./pages/Exports";
 import { Review } from "./pages/Review";
 import { Settings } from "./pages/Settings";
@@ -11,7 +10,7 @@ import { Sources } from "./pages/Sources";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 function AppContent() {
-  const [page, setPage] = useState("dashboard");
+  const [page, setPage] = useState("sources");
   const { collapsed, toggle } = useSidebar();
 
   return (
@@ -27,7 +26,6 @@ function AppContent() {
           </h1>
         </header>
         <div className="content">
-          {page === "dashboard" && <Dashboard />}
           {page === "sources" && <Sources />}
           {page === "sessions" && <Sessions />}
           {page === "review" && <Review />}
