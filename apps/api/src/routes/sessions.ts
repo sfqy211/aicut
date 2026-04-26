@@ -63,4 +63,30 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
       candidates: rows(db.prepare("SELECT * FROM candidates WHERE session_id = ? ORDER BY score_total DESC"), params.id)
     };
   });
+
+  app.get("/sessions/:id/danmaku", async (request, reply) => {
+    const params = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
+    const query = z.object({ since: z.coerce.number().optional() }).parse(request.query);
+    const db = getDb();
+
+    const session = row(db.prepare("SELECT id FROM sessions WHERE id = ?"), params.id);
+    if (!session) return reply.notFound("Session not found");
+
+    const since = query.since;
+    const sql = `
+      SELECT de.id, de.event_type, de.timestamp_ms, de.text, de.user_id, de.price
+      FROM danmaku_events de
+      JOIN segments s ON s.id = de.segment_id
+      WHERE s.session_id = ?
+        ${since !== undefined ? "AND de.timestamp_ms > ?" : ""}
+      ORDER BY de.timestamp_ms ASC
+      LIMIT 5000
+    `;
+    const stmt = db.prepare(sql);
+    const result = since !== undefined
+      ? rows(stmt, [params.id, since])
+      : rows(stmt, params.id);
+
+    return result;
+  });
 };

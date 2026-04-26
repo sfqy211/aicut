@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { SidebarProvider, useSidebar } from "./contexts/SidebarContext";
 import { SystemRail } from "./components/SystemRail";
 import { Exports } from "./pages/Exports";
+import { LivePreview } from "./pages/LivePreview";
 import { Review } from "./pages/Review";
 import { Settings } from "./pages/Settings";
 import { Sessions } from "./pages/Sessions";
@@ -11,7 +12,13 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 
 function AppContent() {
   const [page, setPage] = useState("sources");
+  const [livePreviewSessionId, setLivePreviewSessionId] = useState<number | null>(null);
   const { collapsed, toggle } = useSidebar();
+
+  const enterLivePreview = useCallback((sessionId: number) => {
+    setLivePreviewSessionId(sessionId);
+    setPage("live-preview");
+  }, []);
 
   return (
     <main className="app-shell">
@@ -25,9 +32,10 @@ function AppContent() {
             AICut 运营控制台
           </h1>
         </header>
-        <div className="content">
+        <div className={`content ${page === "live-preview" ? "content-live-preview" : ""}`}>
           {page === "sources" && <Sources />}
-          {page === "sessions" && <Sessions />}
+          {page === "sessions" && <Sessions onEnterLivePreview={enterLivePreview} />}
+          {page === "live-preview" && <LivePreview sessionId={livePreviewSessionId} />}
           {page === "review" && <Review />}
           {page === "exports" && <Exports />}
           {page === "settings" && <Settings />}

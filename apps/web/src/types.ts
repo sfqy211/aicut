@@ -153,6 +153,15 @@ export type SessionTranscript = {
   status: "recording" | "completed" | "error";
 };
 
+export type DanmakuEvent = {
+  id: number;
+  event_type: "danmaku" | "super_chat" | "gift" | "guard";
+  timestamp_ms: number;
+  text: string;
+  user_id: string | null;
+  price: number;
+};
+
 export type SettingsMap = Record<string, { value: string | null; updatedAt: number }>;
 
 export type SystemSettings = {

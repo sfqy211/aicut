@@ -1,4 +1,4 @@
-import { Activity, Database, Moon, Radio, Rows3, Settings2, Sun, WandSparkles } from "lucide-react";
+import { Activity, Database, Eye, Moon, Radio, Rows3, Settings2, Sun, WandSparkles } from "lucide-react";
 import { useTheme } from "../contexts/ThemeContext";
 import { useSidebar } from "../contexts/SidebarContext";
 
@@ -10,6 +10,7 @@ type Props = {
 const items = [
   { id: "sources", label: "直播源", icon: Radio },
   { id: "sessions", label: "会话管理", icon: Rows3 },
+  { id: "live-preview", label: "实时预览", icon: Eye },
   { id: "review", label: "切片审核", icon: WandSparkles },
   { id: "exports", label: "导出历史", icon: Database },
   { id: "settings", label: "系统设置", icon: Settings2 },

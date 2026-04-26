@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiGet } from "../api/client";
 import { useEventStream } from "../hooks/useEventStream";
-import { LiveMonitor } from "./LiveMonitor";
 import type { Session, SessionDetail, SessionSegment } from "../types";
 
 function formatSeconds(value: number | null | undefined) {
@@ -11,11 +10,14 @@ function formatSeconds(value: number | null | undefined) {
   return `${min}:${String(sec).padStart(2, "0")}`;
 }
 
-export function Sessions() {
+type SessionsProps = {
+  onEnterLivePreview: (sessionId: number) => void;
+};
+
+export function Sessions({ onEnterLivePreview }: SessionsProps) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
-  const [monitorSessionId, setMonitorSessionId] = useState<number | null>(null);
   const lastEvent = useEventStream();
 
   useEffect(() => {
@@ -35,7 +37,6 @@ export function Sessions() {
 
   const segments = detail?.segments ?? [];
   const selectedSession = useMemo(() => sessions.find((s) => s.id === selectedId) ?? null, [sessions, selectedId]);
-  const monitorSession = useMemo(() => sessions.find((s) => s.id === monitorSessionId) ?? null, [sessions, monitorSessionId]);
 
   return (
     <div className="sessions-layout">
@@ -68,10 +69,10 @@ export function Sessions() {
         <div className="panel-header">
           <span className="panel-title">{selectedSession?.title || "选择会话"}</span>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {selectedSession?.status === "recording" && (
+            {selectedSession && (
               <button
                 className="btn btn-sm btn-primary"
-                onClick={() => setMonitorSessionId(selectedSession.id)}
+                onClick={() => onEnterLivePreview(selectedSession.id)}
               >
                 监控
               </button>
@@ -100,15 +101,6 @@ export function Sessions() {
           </table>
         )}
       </div>
-
-      {/* LiveMonitor Overlay */}
-      {monitorSessionId && monitorSession && (
-        <LiveMonitor
-          sessionId={monitorSessionId}
-          sessionTitle={monitorSession.title || `Session #${monitorSessionId}`}
-          onClose={() => setMonitorSessionId(null)}
-        />
-      )}
     </div>
   );
 }
