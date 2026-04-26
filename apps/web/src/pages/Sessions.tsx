@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiGet } from "../api/client";
 import { useEventStream } from "../hooks/useEventStream";
-import type { Session, SessionDetail, SessionSegment } from "../types";
+import type { Session, Source } from "../types";
+import { Radio, Video } from "lucide-react";
+
+function formatBytes(value: number | null | undefined) {
+  if (value == null) return "--";
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
 
 function formatSeconds(value: number | null | undefined) {
   if (value == null) return "--";
@@ -10,122 +19,200 @@ function formatSeconds(value: number | null | undefined) {
   return `${min}:${String(sec).padStart(2, "0")}`;
 }
 
+function formatDateTime(ts: number | undefined) {
+  if (!ts) return "--";
+  const d = new Date(ts);
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
 type SessionsProps = {
   onEnterLivePreview: (sessionId: number) => void;
 };
 
 export function Sessions({ onEnterLivePreview }: SessionsProps) {
+  const [sources, setSources] = useState<Source[]>([]);
+  const [selectedSourceId, setSelectedSourceId] = useState<number | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [detail, setDetail] = useState<SessionDetail | null>(null);
   const lastEvent = useEventStream();
 
+  // 加载主播列表
   useEffect(() => {
-    void apiGet<Session[]>("/api/sessions").then((items) => {
-      setSessions(items);
-      setSelectedId((current) => current ?? items[0]?.id ?? null);
+    void apiGet<Source[]>("/api/sources").then((items) => {
+      setSources(items);
+      setSelectedSourceId((current) => current ?? items[0]?.id ?? null);
     });
   }, [lastEvent]);
 
+  // 加载选中主播的场次
   useEffect(() => {
-    if (!selectedId) {
-      setDetail(null);
+    if (selectedSourceId == null) {
+      setSessions([]);
       return;
     }
-    void apiGet<SessionDetail>(`/api/sessions/${selectedId}`).then(setDetail);
-  }, [selectedId, lastEvent]);
+    void apiGet<Session[]>(`/api/sources/${selectedSourceId}/sessions`).then(setSessions);
+  }, [selectedSourceId, lastEvent]);
 
-  const segments = detail?.segments ?? [];
-  const selectedSession = useMemo(() => sessions.find((s) => s.id === selectedId) ?? null, [sessions, selectedId]);
+  const liveSessions = useMemo(() => sessions.filter((s) => s.status === "recording"), [sessions]);
+  const endedSessions = useMemo(() => sessions.filter((s) => s.status !== "recording"), [sessions]);
+
+  const selectedSource = useMemo(
+    () => sources.find((s) => s.id === selectedSourceId) ?? null,
+    [sources, selectedSourceId]
+  );
 
   return (
     <div className="sessions-layout">
-      {/* Session List */}
+      {/* 左侧：主播列表 */}
       <aside className="panel" style={{ display: "flex", flexDirection: "column" }}>
         <div className="panel-header">
-          <span className="panel-title">会话列表</span>
-          <span className="tag">{sessions.length} SESSIONS</span>
+          <span className="panel-title">主播列表</span>
+          <span className="tag">{sources.length} 主播</span>
         </div>
         <div className="session-list">
-          {sessions.length === 0 ? (
-            <div className="panel-body text-muted">暂无会话</div>
+          {sources.length === 0 ? (
+            <div className="panel-body text-muted">暂无主播</div>
           ) : (
-            sessions.map((session) => (
-              <button
-                key={session.id}
-                className={`session-chip ${session.id === selectedId ? "active" : ""}`}
-                onClick={() => setSelectedId(session.id)}
-              >
-                <span className="session-chip-title">{session.title || `Session #${session.id}`}</span>
-                <span className="session-chip-meta">{session.status}</span>
-              </button>
-            ))
+            sources.map((source) => {
+              const isRecording = source.runtime?.state === "recording";
+              return (
+                <button
+                  key={source.id}
+                  className={`session-chip ${source.id === selectedSourceId ? "active" : ""}`}
+                  onClick={() => setSelectedSourceId(source.id)}
+                >
+                  <span className="session-chip-title">
+                    {source.streamer_name || `房间 ${source.room_id}`}
+                  </span>
+                  <span className="session-chip-meta" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span className="mono" style={{ fontSize: 11 }}>{source.room_id}</span>
+                    {isRecording && (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "var(--danger)" }}>
+                        <Radio size={10} />
+                        直播中
+                      </span>
+                    )}
+                  </span>
+                </button>
+              );
+            })
           )}
         </div>
       </aside>
 
-      {/* Session Detail */}
-      <div className="panel" style={{ display: "flex", flexDirection: "column" }}>
+      {/* 右侧：直播场次 */}
+      <div className="panel" style={{ display: "flex", flexDirection: "column", overflow: "auto" }}>
         <div className="panel-header">
-          <span className="panel-title">{selectedSession?.title || "选择会话"}</span>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {selectedSession && (
-              <button
-                className="btn btn-sm btn-primary"
-                onClick={() => onEnterLivePreview(selectedSession.id)}
-              >
-                监控
-              </button>
-            )}
-            {selectedSession && <span className="tag">直播</span>}
-          </div>
+          <span className="panel-title">
+            {selectedSource ? (selectedSource.streamer_name || `房间 ${selectedSource.room_id}`) : "选择主播"}
+          </span>
+          <span className="tag">{sessions.length} 场次</span>
         </div>
-        {detail == null ? (
-          <div className="panel-body text-muted">暂无数据</div>
+
+        {sessions.length === 0 ? (
+          <div className="panel-body text-muted">该主播暂无直播场次</div>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>分段</th>
-                <th>状态</th>
-                <th>时长</th>
-                <th>弹幕热度</th>
-                <th>转写</th>
-              </tr>
-            </thead>
-            <tbody>
-              {segments.map((segment) => (
-                <SegmentRow key={segment.id} segment={segment} />
-              ))}
-            </tbody>
-          </table>
+          <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 24 }}>
+            {/* 直播中 */}
+            {liveSessions.length > 0 && (
+              <section>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                  <Radio size={14} style={{ color: "var(--danger)" }} />
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--danger)" }}>直播中</span>
+                  <span className="tag">{liveSessions.length}</span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+                  {liveSessions.map((session) => (
+                    <SessionCard
+                      key={session.id}
+                      session={session}
+                      isLive
+                      onEnter={() => onEnterLivePreview(session.id)}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* 已结束 */}
+            {endedSessions.length > 0 && (
+              <section>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                  <Video size={14} style={{ color: "var(--text-secondary)" }} />
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)" }}>已结束</span>
+                  <span className="tag">{endedSessions.length}</span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+                  {endedSessions.map((session) => (
+                    <SessionCard
+                      key={session.id}
+                      session={session}
+                      isLive={false}
+                      onEnter={() => onEnterLivePreview(session.id)}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+          </div>
         )}
       </div>
     </div>
   );
 }
 
-function SegmentRow({ segment }: { segment: SessionSegment }) {
-  const heat = Math.min(100, Math.round((segment.danmaku_count / Math.max(segment.duration || 30, 30)) * 300));
-
+function SessionCard({
+  session,
+  isLive,
+  onEnter,
+}: {
+  session: Session;
+  isLive: boolean;
+  onEnter: () => void;
+}) {
   return (
-    <tr>
-      <td>
-        <span className="mono">#{segment.id}</span>
-      </td>
-      <td className={segment.status === "completed" ? "text-success" : segment.status === "failed" ? "text-danger" : "text-muted"}>
-        {segment.status}
-      </td>
-      <td className="mono">{formatSeconds(segment.duration)}</td>
-      <td>
-        <div className="heat-strip">
-          <div className="heat-strip-fill" style={{ width: `${heat}%` }} />
+    <div
+      className="panel"
+      style={{
+        padding: 14,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        borderLeft: `3px solid ${isLive ? "var(--danger)" : "var(--border)"}`,
+        cursor: "pointer",
+        transition: "all 0.15s",
+      }}
+      onClick={onEnter}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {session.title || `直播 ${session.live_id || `#${session.id}`}`}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
+            {formatDateTime(session.start_time ?? session.created_at)}
+          </div>
         </div>
-        <span className="mono text-muted" style={{ fontSize: 11 }}>{segment.danmaku_count}</span>
-      </td>
-      <td style={{ maxWidth: 360, color: "var(--text-secondary)", lineHeight: 1.4 }}>
-        {segment.transcript_text || segment.error_msg || "等待转写"}
-      </td>
-    </tr>
+        {isLive ? (
+          <span className="tag" style={{ background: "var(--danger)", color: "#fff", fontSize: 10, flexShrink: 0 }}>
+            LIVE
+          </span>
+        ) : (
+          <span className="tag" style={{ fontSize: 10, flexShrink: 0 }}>
+            {session.status}
+          </span>
+        )}
+      </div>
+
+      <div style={{ display: "flex", gap: 16, fontSize: 12, color: "var(--text-secondary)" }}>
+        <span>时长 {formatSeconds(session.total_duration)}</span>
+        <span>大小 {formatBytes(session.total_size)}</span>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button className="btn btn-sm btn-primary" onClick={(e) => { e.stopPropagation(); onEnter(); }}>
+          {isLive ? "实时监控" : "查看回放"}
+        </button>
+      </div>
+    </div>
   );
 }

@@ -64,6 +64,25 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
+  app.get("/sources/:id/sessions", async (request, reply) => {
+    const params = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
+    const db = getDb();
+
+    const source = row(db.prepare("SELECT id FROM sources WHERE id = ?"), params.id);
+    if (!source) return reply.notFound("Source not found");
+
+    return rows(
+      db.prepare(
+        `SELECT id, live_id, title, streamer_name, cover_url, start_time, end_time,
+                status, total_duration, total_size, created_at
+         FROM sessions
+         WHERE source_id = ?
+         ORDER BY CASE WHEN status = 'recording' THEN 0 ELSE 1 END, id DESC`
+      ),
+      params.id
+    );
+  });
+
   app.get("/sessions/:id/danmaku", async (request, reply) => {
     const params = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
     const query = z.object({ since: z.coerce.number().optional() }).parse(request.query);
@@ -74,12 +93,11 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
 
     const since = query.since;
     const sql = `
-      SELECT de.id, de.event_type, de.timestamp_ms, de.text, de.user_id, de.price
-      FROM danmaku_events de
-      JOIN segments s ON s.id = de.segment_id
-      WHERE s.session_id = ?
-        ${since !== undefined ? "AND de.timestamp_ms > ?" : ""}
-      ORDER BY de.timestamp_ms ASC
+      SELECT id, event_type, timestamp_ms, text, user_id, price
+      FROM danmaku_events
+      WHERE session_id = ?
+        ${since !== undefined ? "AND timestamp_ms > ?" : ""}
+      ORDER BY timestamp_ms ASC
       LIMIT 5000
     `;
     const stmt = db.prepare(sql);

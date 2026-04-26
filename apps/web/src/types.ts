@@ -35,6 +35,10 @@ export type Session = {
   status: string;
   streamer_name?: string;
   room_id?: string;
+  live_id?: string;
+  cover_url?: string;
+  start_time?: number;
+  end_time?: number;
   total_duration?: number;
   total_size?: number;
   created_at: number;
