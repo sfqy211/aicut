@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { apiGet, apiPost } from "../api/client";
 import { useEventStream } from "../hooks/useEventStream";
-import type { Candidate, CandidateDetail } from "../types";
+import type { Candidate, CandidateDetail, ExportJob } from "../types";
 
 const ClipPlayer = lazy(async () => {
   const module = await import("../components/Player/ClipPlayer");
@@ -43,6 +43,8 @@ export function Review() {
   const [selectedDetail, setSelectedDetail] = useState<CandidateDetail | null>(null);
   const [draftRange, setDraftRange] = useState<{ start: number; end: number } | null>(null);
   const [filter, setFilter] = useState<"pending" | "approved" | "rejected" | "all">("pending");
+  const [exports, setExports] = useState<ExportJob[]>([]);
+  const [exportsExpanded, setExportsExpanded] = useState(false);
   const lastEvent = useEventStream();
 
   async function refresh() {
@@ -60,6 +62,7 @@ export function Review() {
     if (!selectedId) {
       setSelectedDetail(null);
       setDraftRange(null);
+      setExports([]);
       return;
     }
 
@@ -69,6 +72,8 @@ export function Review() {
         start: detail.start_time,
         end: detail.end_time,
       });
+      // 加载该 session 的导出历史
+      void apiGet<ExportJob[]>(`/api/exports?sessionId=${detail.session_id}&limit=20`).then(setExports);
     });
   }, [selectedId, lastEvent]);
 
@@ -244,6 +249,58 @@ export function Review() {
                     <button className="btn btn-reject" onClick={() => reject(selected.id)}>驳回</button>
                   </div>
                 )}
+
+                {/* 导出历史 */}
+                <div className="detail-section" style={{ marginTop: 12 }}>
+                  <button
+                    className="detail-section-title"
+                    style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, width: "100%" }}
+                    onClick={() => setExportsExpanded((v) => !v)}
+                  >
+                    <span>导出历史</span>
+                    <span className="tag">{exports.length}</span>
+                    <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-secondary)" }}>
+                      {exportsExpanded ? "收起" : "展开"}
+                    </span>
+                  </button>
+                  {exportsExpanded && (
+                    exports.length === 0 ? (
+                      <p className="text-muted" style={{ fontSize: 12, marginTop: 8 }}>该场次暂无导出记录</p>
+                    ) : (
+                      <table className="data-table" style={{ marginTop: 8, fontSize: 12 }}>
+                        <thead>
+                          <tr>
+                            <th>ID</th>
+                            <th>状态</th>
+                            <th>进度</th>
+                            <th>输出路径</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {exports.map((job) => (
+                            <tr key={job.id}>
+                              <td className="mono">#{job.id}</td>
+                              <td className={job.status === "completed" ? "text-success" : job.status === "failed" ? "text-danger" : "text-muted"}>
+                                {job.status}
+                              </td>
+                              <td>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <div className="bar-bg" style={{ width: 60, height: 4 }}>
+                                    <div className="bar-fill accent" style={{ width: `${job.progress}%` }} />
+                                  </div>
+                                  <span className="mono" style={{ fontSize: 11 }}>{job.progress}%</span>
+                                </div>
+                              </td>
+                              <td className="text-muted" style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {job.output_path || "-"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )
+                  )}
+                </div>
               </>
             ) : (
               <div className="panel-body text-muted">点击左侧候选片段展开播放器</div>

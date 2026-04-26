@@ -2,7 +2,6 @@ import { useCallback, useState } from "react";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { SidebarProvider, useSidebar } from "./contexts/SidebarContext";
 import { SystemRail } from "./components/SystemRail";
-import { Exports } from "./pages/Exports";
 import { LivePreview } from "./pages/LivePreview";
 import { Review } from "./pages/Review";
 import { Settings } from "./pages/Settings";
@@ -37,7 +36,6 @@ function AppContent() {
           {page === "sessions" && <Sessions onEnterLivePreview={enterLivePreview} />}
           {page === "live-preview" && <LivePreview sessionId={livePreviewSessionId} />}
           {page === "review" && <Review />}
-          {page === "exports" && <Exports />}
           {page === "settings" && <Settings />}
         </div>
       </section>
