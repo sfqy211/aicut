@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { startListen } from "@bililive-tools/bilibili-recorder/lib/blive-message-listener/index.js";
+import { startListen } from "@bililive-tools/bilibili-recorder/blive-message-listener/index.js";
 import { getDb } from "../../db/index.js";
 import { getDanmuPath, ensureSessionDir } from "../library/index.js";
 import { eventBus } from "../../events/bus.js";

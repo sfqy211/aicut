@@ -2,7 +2,7 @@ import {
   getInfo,
   getStream,
   getLiveStatus,
-} from "@bililive-tools/bilibili-recorder/lib/stream.js";
+} from "@bililive-tools/bilibili-recorder/stream.js";
 
 export interface BiliRoomInfo {
   roomId: number;
