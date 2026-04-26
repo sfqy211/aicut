@@ -7,7 +7,15 @@ import { eventBus } from "../events/bus.js";
 
 const exportInput = z.object({
   sessionId: z.number().int().positive(),
-  candidateIds: z.array(z.number().int().positive()).min(1),
+  candidateIds: z.array(z.number().int().positive()).optional(),
+  ranges: z
+    .array(
+      z.object({
+        start: z.number().min(0),
+        end: z.number().min(0),
+      })
+    )
+    .optional(),
   options: z
     .object({
       hardcodeSubtitles: z.boolean().default(false),
@@ -16,7 +24,12 @@ const exportInput = z.object({
       format: z.enum(["mp4", "webm"]).default("mp4"),
     })
     .default({}),
-});
+}).refine(
+  (data) =>
+    (data.candidateIds && data.candidateIds.length > 0) ||
+    (data.ranges && data.ranges.length > 0),
+  { message: "Either candidateIds or ranges must be provided" }
+);
 
 export const exportsRoutes: FastifyPluginAsync = async (app) => {
   // 获取导出列表
@@ -99,27 +112,45 @@ export const exportsRoutes: FastifyPluginAsync = async (app) => {
 
     if (!session) return reply.notFound("Session not found");
 
-    // 验证 candidates 存在且属于该 session
-    const placeholders = input.candidateIds.map(() => "?").join(",");
-    const validCandidates = rows<{ id: number }>(
-      db.prepare(
-        `SELECT id FROM candidates WHERE session_id = ? AND id IN (${placeholders})`
-      ),
-      [input.sessionId, ...input.candidateIds]
-    );
+    const useRanges = input.ranges && input.ranges.length > 0;
+    let candidateIdsJson = "[]";
+    let rangesJson: string | null = null;
 
-    if (validCandidates.length === 0) {
-      return reply.badRequest("No valid candidates found");
+    if (useRanges) {
+      // ranges 模式：直接按时间范围导出，跳过 candidates 校验
+      rangesJson = JSON.stringify(input.ranges);
+      // 校验时间范围有效性
+      for (const r of input.ranges!) {
+        if (r.end <= r.start) {
+          return reply.badRequest(`Invalid range: ${r.start} ~ ${r.end}`);
+        }
+      }
+    } else {
+      // candidateIds 模式（原有流程）
+      const candidateIds = input.candidateIds!;
+      const placeholders = candidateIds.map(() => "?").join(",");
+      const validCandidates = rows<{ id: number }>(
+        db.prepare(
+          `SELECT id FROM candidates WHERE session_id = ? AND id IN (${placeholders})`
+        ),
+        [input.sessionId, ...candidateIds]
+      );
+
+      if (validCandidates.length === 0) {
+        return reply.badRequest("No valid candidates found");
+      }
+      candidateIdsJson = JSON.stringify(candidateIds);
     }
 
     const result = db
       .prepare(
-        `INSERT INTO exports (session_id, candidate_ids, options_json, status, progress)
-         VALUES (@sessionId, @candidateIds, @options, 'pending', 0)`
+        `INSERT INTO exports (session_id, candidate_ids, ranges_json, options_json, status, progress)
+         VALUES (@sessionId, @candidateIds, @rangesJson, @options, 'pending', 0)`
       )
       .run({
         sessionId: input.sessionId,
-        candidateIds: JSON.stringify(input.candidateIds),
+        candidateIds: candidateIdsJson,
+        rangesJson,
         options: JSON.stringify(input.options),
       });
 

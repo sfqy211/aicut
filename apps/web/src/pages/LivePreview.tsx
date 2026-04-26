@@ -11,20 +11,23 @@ import {
 import type { MosaicNode, MosaicPath } from "react-mosaic-component";
 import "react-mosaic-component/react-mosaic-component.css";
 import { X, Eye } from "lucide-react";
-import { apiGet } from "../api/client";
+import { apiGet, apiPost } from "../api/client";
 import { useDanmaku } from "../hooks/useDanmaku";
-import type { DanmakuEvent, LiveTranscriptChunk, SessionDetail } from "../types";
+import { useCandidates } from "../hooks/useCandidates";
+import { Timeline } from "../components/Timeline/Timeline";
+import { CandidatePanel } from "../components/CandidatePanel/CandidatePanel";
+import type { DanmakuEvent, LiveTranscriptChunk, SessionDetail, Candidate, ClipSelection } from "../types";
 
-type PanelKey = "video" | "subtitles" | "danmaku" | "ai";
+type PanelKey = "video" | "subtitles" | "danmaku" | "candidates";
 
 const PANEL_TITLES: Record<PanelKey, string> = {
   video: "直播画面",
   subtitles: "转录字幕",
   danmaku: "弹幕与互动",
-  ai: "AI 实时分析",
+  candidates: "候选片段",
 };
 
-const ALL_PANELS: PanelKey[] = ["video", "subtitles", "danmaku", "ai"];
+const ALL_PANELS: PanelKey[] = ["video", "subtitles", "danmaku", "candidates"];
 
 const DEFAULT_LAYOUT: MosaicNode<PanelKey> = {
   type: "split",
@@ -39,7 +42,7 @@ const DEFAULT_LAYOUT: MosaicNode<PanelKey> = {
     {
       type: "split",
       direction: "column",
-      children: ["danmaku", "ai"],
+      children: ["danmaku", "candidates"],
       splitPercentages: [70, 30],
     },
   ],
@@ -68,7 +71,13 @@ export function LivePreview({ sessionId }: Props) {
   const danmakuAutoScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { events: danmakuEvents, loading: danmakuLoading } = useDanmaku(sessionId);
+  const { candidates, loading: candidatesLoading } = useCandidates(sessionId);
   const isRecording = sessionDetail?.session.status === "recording";
+
+  const [selection, setSelection] = useState<ClipSelection | null>(null);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [isExporting, setIsExporting] = useState(false);
 
   // 加载 session 详情与历史字幕
   useEffect(() => {
@@ -127,6 +136,16 @@ export function LivePreview({ sessionId }: Props) {
 
     const onTimeUpdate = () => {
       setCurrentTime(video.currentTime);
+      let dur = 0;
+      if (video.duration && video.duration !== Infinity && video.duration > 0) {
+        dur = video.duration;
+      } else {
+        const seekable = video.seekable;
+        if (seekable.length > 0) {
+          dur = seekable.end(seekable.length - 1) - seekable.start(0);
+        }
+      }
+      if (dur > 0) setVideoDuration(dur);
       if (isLiveMode) {
         const seekable = video.seekable;
         if (seekable.length > 0) {
@@ -266,6 +285,127 @@ export function LivePreview({ sessionId }: Props) {
     [formatTime]
   );
 
+  // 时间轴跳转
+  const handleSeek = useCallback((time: number) => {
+    const video = playerRef.current;
+    if (!video) return;
+    video.currentTime = time;
+    setIsLiveMode(false);
+  }, []);
+
+  // 选中候选片段
+  const handleSelectCandidate = useCallback((candidate: Candidate) => {
+    const video = playerRef.current;
+    if (!video) return;
+    video.currentTime = candidate.start_time;
+    setIsLiveMode(false);
+    setSelection({
+      start: candidate.start_time,
+      end: candidate.end_time,
+      candidateId: candidate.id,
+    });
+  }, []);
+
+  // 切片快捷键
+  const handleSetClipStart = useCallback(() => {
+    const video = playerRef.current;
+    if (!video) return;
+    const start = video.currentTime;
+    setSelection((prev) => {
+      const end = prev && prev.end > start ? prev.end : video.duration || start + 30;
+      return { start, end };
+    });
+  }, []);
+
+  const handleSetClipEnd = useCallback(() => {
+    const video = playerRef.current;
+    if (!video) return;
+    const end = video.currentTime;
+    setSelection((prev) => {
+      const start = prev && prev.start < end ? prev.start : 0;
+      return { start, end };
+    });
+  }, []);
+
+  const handleSeekToClipStart = useCallback(() => {
+    if (selection) handleSeek(selection.start);
+  }, [selection, handleSeek]);
+
+  const handleSeekToClipEnd = useCallback(() => {
+    if (selection) handleSeek(selection.end);
+  }, [selection, handleSeek]);
+
+  const handleClearSelection = useCallback(() => {
+    setSelection(null);
+  }, []);
+
+  const handleExport = useCallback(async () => {
+    if (!sessionId || !selection || selection.end <= selection.start) return;
+    setIsExporting(true);
+    try {
+      await apiPost("/api/exports", {
+        sessionId,
+        ranges: [{ start: Math.floor(selection.start), end: Math.ceil(selection.end) }],
+        options: { format: "mp4", quality: "original" },
+      });
+      alert("导出任务已创建，可在「导出管理」中查看进度。");
+    } catch (err) {
+      alert("导出失败: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsExporting(false);
+    }
+  }, [sessionId, selection]);
+
+  // 全局键盘监听
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const isInInput =
+        !!tag && ["INPUT", "TEXTAREA", "SELECT"].includes(tag);
+      if (isInInput) return;
+
+      switch (e.key) {
+        case "[":
+          e.preventDefault();
+          handleSetClipStart();
+          break;
+        case "]":
+          e.preventDefault();
+          handleSetClipEnd();
+          break;
+        case "q":
+        case "Q":
+          e.preventDefault();
+          handleSeekToClipStart();
+          break;
+        case "e":
+        case "E":
+          e.preventDefault();
+          handleSeekToClipEnd();
+          break;
+        case "c":
+        case "C":
+          e.preventDefault();
+          handleClearSelection();
+          break;
+        case "h":
+        case "H":
+          e.preventDefault();
+          setShowShortcuts((v) => !v);
+          break;
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [
+    handleSetClipStart,
+    handleSetClipEnd,
+    handleSeekToClipStart,
+    handleSeekToClipEnd,
+    handleClearSelection,
+  ]);
+
   // 隐藏/显示面板
   const handleHidePanel = useCallback((key: PanelKey) => {
     setHiddenPanels((prev) => {
@@ -319,6 +459,14 @@ export function LivePreview({ sessionId }: Props) {
                 isRecording={isRecording}
                 liveSubtitle={liveSubtitle}
                 onBackToLive={handleBackToLive}
+                duration={videoDuration}
+                currentTime={currentTime}
+                candidates={candidates}
+                selection={selection}
+                onSeek={handleSeek}
+                onSelectCandidate={handleSelectCandidate}
+                showShortcuts={showShortcuts}
+                onToggleShortcuts={() => setShowShortcuts((v) => !v)}
               />
             )}
             {id === "subtitles" && (
@@ -343,7 +491,16 @@ export function LivePreview({ sessionId }: Props) {
                 formatMs={formatMs}
               />
             )}
-            {id === "ai" && <AIPanel />}
+            {id === "candidates" && (
+              <CandidatePanel
+                candidates={candidates}
+                loading={candidatesLoading}
+                selection={selection}
+                isExporting={isExporting}
+                onSelect={handleSelectCandidate}
+                onExport={handleExport}
+              />
+            )}
           </div>
         </MosaicWindow>
       );
@@ -358,12 +515,20 @@ export function LivePreview({ sessionId }: Props) {
       filteredDanmaku,
       danmakuLoading,
       danmakuFilter,
+      candidates,
+      candidatesLoading,
+      selection,
+      showShortcuts,
+      currentTime,
       handleBackToLive,
       handleSeekToSubtitle,
       handleDanmakuScroll,
       formatTime,
       formatMs,
       handleHidePanel,
+      handleSeek,
+      handleSelectCandidate,
+      handleExport,
     ]
   );
 
@@ -431,42 +596,117 @@ function VideoPanel({
   isRecording,
   liveSubtitle,
   onBackToLive,
+  duration,
+  currentTime,
+  candidates,
+  selection,
+  onSeek,
+  onSelectCandidate,
+  showShortcuts,
+  onToggleShortcuts,
 }: {
   playerRef: React.RefObject<HTMLVideoElement | null>;
   isLiveMode: boolean;
   isRecording: boolean;
   liveSubtitle: LiveTranscriptChunk | null;
   onBackToLive: () => void;
+  duration: number;
+  currentTime: number;
+  candidates: Candidate[];
+  selection: ClipSelection | null;
+  onSeek: (time: number) => void;
+  onSelectCandidate: (candidate: Candidate) => void;
+  showShortcuts: boolean;
+  onToggleShortcuts: () => void;
 }) {
   return (
-    <div className="live-preview-video-wrap">
-      <video ref={playerRef} controls style={{ width: "100%", height: "100%" }} />
-      {!isLiveMode && isRecording && (
-        <button className="btn btn-sm live-preview-back-to-live" onClick={onBackToLive}>
-          回到最新
-        </button>
-      )}
-      {isLiveMode && liveSubtitle && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: 48,
-            left: "50%",
-            transform: "translateX(-50%)",
-            padding: "6px 14px",
-            fontSize: 14,
-            color: "#fff",
-            background: "rgba(0,0,0,0.65)",
-            whiteSpace: "nowrap",
-            maxWidth: "90%",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            pointerEvents: "none",
-          }}
-        >
-          {liveSubtitle.text}
-        </div>
-      )}
+    <div className="live-preview-video-wrap" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <div style={{ position: "relative", flex: 1, minHeight: 0, overflow: "hidden" }}>
+        <video ref={playerRef} controls style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+        {!isLiveMode && isRecording && (
+          <button className="btn btn-sm live-preview-back-to-live" onClick={onBackToLive}>
+            回到最新
+          </button>
+        )}
+        {isLiveMode && liveSubtitle && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: 48,
+              left: "50%",
+              transform: "translateX(-50%)",
+              padding: "6px 14px",
+              fontSize: 14,
+              color: "#fff",
+              background: "rgba(0,0,0,0.65)",
+              whiteSpace: "nowrap",
+              maxWidth: "90%",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              pointerEvents: "none",
+            }}
+          >
+            {liveSubtitle.text}
+          </div>
+        )}
+        {showShortcuts && (
+          <ShortcutsHelp onClose={onToggleShortcuts} />
+        )}
+      </div>
+      <Timeline
+        duration={duration}
+        currentTime={currentTime}
+        candidates={candidates}
+        selection={selection}
+        onSeek={onSeek}
+        onSelectCandidate={onSelectCandidate}
+      />
+    </div>
+  );
+}
+
+function ShortcutsHelp({ onClose }: { onClose: () => void }) {
+  const items = [
+    { key: "[", desc: "设置入点（选区起点）" },
+    { key: "]", desc: "设置出点（选区终点）" },
+    { key: "Q", desc: "跳转到入点" },
+    { key: "E", desc: "跳转到出点" },
+    { key: "C", desc: "清除选区" },
+    { key: "H", desc: "显示 / 隐藏快捷键提示" },
+  ];
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "rgba(0,0,0,0.7)",
+        zIndex: 20,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: "#1a1a1c",
+          border: "1px solid #333",
+          borderRadius: 6,
+          padding: "16px 20px",
+          minWidth: 260,
+          pointerEvents: "auto",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#f0f0f0", marginBottom: 10 }}>快捷键</div>
+        {items.map((item) => (
+          <div key={item.key} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 12 }}>
+            <span style={{ color: "#e8b339", fontWeight: 600, fontFamily: "monospace" }}>{item.key}</span>
+            <span style={{ color: "#b0b0b0" }}>{item.desc}</span>
+          </div>
+        ))}
+        <div style={{ fontSize: 11, color: "#666", marginTop: 10, textAlign: "center" }}>点击空白处关闭</div>
+      </div>
     </div>
   );
 }
@@ -581,19 +821,6 @@ function DanmakuRow({ event, formatMs }: { event: DanmakuEvent; formatMs: (ms: n
       {event.user_id && <span className="danmaku-item-user">{event.user_id}</span>}
       <span className="danmaku-item-text">{event.text}</span>
       {event.price > 0 && <span className="danmaku-item-price">¥{event.price}</span>}
-    </div>
-  );
-}
-
-function AIPanel() {
-  return (
-    <div className="live-preview-ai-panel">
-      <div className="ai-skeleton" style={{ height: 120 }} />
-      <div className="ai-skeleton" style={{ height: 80 }} />
-      <div className="ai-skeleton" style={{ height: 160 }} />
-      <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 8 }}>
-        分析面板预留接口，后续接入 LLM 实时评分与摘要。
-      </div>
     </div>
   );
 }

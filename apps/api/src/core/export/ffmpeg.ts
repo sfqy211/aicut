@@ -293,7 +293,8 @@ export async function processExportTask(exportId: number): Promise<void> {
   const exportJob = row<{
     id: number;
     session_id: number;
-    candidate_ids: string;
+    candidate_ids: string | null;
+    ranges_json: string | null;
     output_path: string | null;
     options_json: string | null;
   }>(db.prepare("SELECT * FROM exports WHERE id = ?"), exportId);
@@ -306,25 +307,32 @@ export async function processExportTask(exportId: number): Promise<void> {
     ? JSON.parse(exportJob.options_json)
     : {};
 
-  const candidateIds = JSON.parse(exportJob.candidate_ids) as number[];
+  // 解析导出源：优先 ranges_json，否则回退 candidate_ids
+  type TimeRange = { start: number; end: number };
+  let ranges: TimeRange[] = [];
 
-  // 获取候选片段信息
-  const candidates = db
-    .prepare(
-      `SELECT c.id, c.start_time, c.end_time, c.duration
-       FROM candidates c
-       WHERE c.id IN (${candidateIds.map(() => "?").join(",")})
-       ORDER BY c.start_time ASC`
-    )
-    .all(...candidateIds) as Array<{
-    id: number;
-    start_time: number;
-    end_time: number;
-    duration: number;
-  }>;
+  if (exportJob.ranges_json) {
+    ranges = JSON.parse(exportJob.ranges_json) as TimeRange[];
+  } else if (exportJob.candidate_ids) {
+    const candidateIds = JSON.parse(exportJob.candidate_ids) as number[];
+    if (candidateIds.length > 0) {
+      const candidates = db
+        .prepare(
+          `SELECT c.start_time, c.end_time
+           FROM candidates c
+           WHERE c.id IN (${candidateIds.map(() => "?").join(",")})
+           ORDER BY c.start_time ASC`
+        )
+        .all(...candidateIds) as Array<{
+        start_time: number;
+        end_time: number;
+      }>;
+      ranges = candidates.map((c) => ({ start: c.start_time, end: c.end_time }));
+    }
+  }
 
-  if (candidates.length === 0) {
-    throw new Error("No valid candidates found");
+  if (ranges.length === 0) {
+    throw new Error("No valid ranges found for export");
   }
 
   // 获取 session 的所有 segments（用于跨 segment 裁剪）
@@ -354,16 +362,16 @@ export async function processExportTask(exportId: number): Promise<void> {
   const format = options.format ?? "mp4";
   const outputPath = path.join(sessionDir, `${baseName}.${format}`);
 
-  // 为每个候选生成 clip 列表（支持跨 segment）
+  // 为每个时间范围生成 clip 列表（支持跨 segment）
   const clips: Array<{ inputPath: string; startSeconds: number; durationSeconds: number }> = [];
-  for (const candidate of candidates) {
+  for (const range of ranges) {
     for (const seg of sessionSegments) {
       const segStart = seg.start_offset;
       const segEnd = segStart + seg.duration;
       // 检查重叠
-      if (candidate.end_time <= segStart || candidate.start_time >= segEnd) continue;
-      const clipStart = Math.max(0, candidate.start_time - segStart);
-      const clipEnd = Math.min(seg.duration, candidate.end_time - segStart);
+      if (range.end <= segStart || range.start >= segEnd) continue;
+      const clipStart = Math.max(0, range.start - segStart);
+      const clipEnd = Math.min(seg.duration, range.end - segStart);
       const clipDuration = clipEnd - clipStart;
       if (clipDuration > 0) {
         clips.push({
@@ -408,10 +416,10 @@ export async function processExportTask(exportId: number): Promise<void> {
         text: string;
       }>;
 
-      for (const candidate of candidates) {
-        // 过滤出候选时间范围内的转写（全局时间戳）
+      for (const range of ranges) {
+        // 过滤出时间范围内的转写（全局时间戳）
         for (const seg of allSegments) {
-          if (seg.start >= candidate.start_time && seg.end <= candidate.end_time) {
+          if (seg.start >= range.start && seg.end <= range.end) {
             transcriptSegments.push(seg);
           }
         }

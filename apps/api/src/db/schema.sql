@@ -111,7 +111,8 @@ CREATE TABLE IF NOT EXISTS candidates (
 CREATE TABLE IF NOT EXISTS exports (
   id INTEGER PRIMARY KEY,
   session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  candidate_ids TEXT NOT NULL,
+  candidate_ids TEXT,
+  ranges_json TEXT,
   output_path TEXT,
   options_json TEXT,
   status TEXT NOT NULL DEFAULT 'pending',

@@ -144,6 +144,17 @@ export type ExportOptions = {
   format?: "mp4" | "webm";
 };
 
+export interface ExportRange {
+  start: number;
+  end: number;
+}
+
+export interface ClipSelection {
+  start: number;
+  end: number;
+  candidateId?: number | null;
+}
+
 export type LiveTranscriptChunk = {
   start: number;
   end: number;
