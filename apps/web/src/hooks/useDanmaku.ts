@@ -42,12 +42,41 @@ export function useDanmaku(sessionId: number | null) {
     };
   }, [sessionId]);
 
-  // SSE 增量更新：监听 segment.danmaku_imported
+  // SSE 增量更新：监听实时弹幕 + 批量导入完成
   useEffect(() => {
     if (sessionId == null) return;
 
     const es = new EventSource("/api/events/stream");
-    const handler = (event: MessageEvent) => {
+
+    // 实时弹幕：直接追加，无需请求 API
+    const realtimeHandler = (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "danmaku.received" && data.payload?.sessionId === sessionId) {
+          const p = data.payload;
+          const ev: DanmakuEvent = {
+            id: -p.timestampMs, // 临时负 ID，避免与 DB 自增 ID 冲突
+            event_type: p.type,
+            timestamp_ms: p.timestampMs,
+            text: p.text,
+            user_id: null,
+            price: p.price ?? 0,
+          };
+          setEvents((prev) => {
+            const merged = [...prev, ev];
+            merged.sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+            const trimmed = merged.length > 5000 ? merged.slice(merged.length - 5000) : merged;
+            return trimmed;
+          });
+          lastTimestampRef.current = ev.timestamp_ms;
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    // 批量导入完成：重新拉取确保数据完整
+    const importedHandler = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
         if (data.type === "segment.danmaku_imported" && data.payload?.sessionId === sessionId) {
@@ -67,7 +96,6 @@ export function useDanmaku(sessionId: number | null) {
                   }
                 }
                 merged.sort((a, b) => a.timestamp_ms - b.timestamp_ms);
-                // 限制最大条数避免 DOM 爆炸
                 const trimmed = merged.length > 5000 ? merged.slice(merged.length - 5000) : merged;
                 return trimmed;
               });
@@ -80,9 +108,12 @@ export function useDanmaku(sessionId: number | null) {
         // ignore
       }
     };
-    es.addEventListener("segment.danmaku_imported", handler);
+
+    es.addEventListener("danmaku.received", realtimeHandler);
+    es.addEventListener("segment.danmaku_imported", importedHandler);
     return () => {
-      es.removeEventListener("segment.danmaku_imported", handler);
+      es.removeEventListener("danmaku.received", realtimeHandler);
+      es.removeEventListener("segment.danmaku_imported", importedHandler);
       es.close();
     };
   }, [sessionId]);
