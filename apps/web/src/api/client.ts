@@ -25,3 +25,10 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   if (!response.ok) throw new Error(await response.text());
   return (await response.json()) as T;
 }
+
+export async function apiDelete<T>(path: string): Promise<T> {
+  const response = await fetch(path, { method: "DELETE" });
+  if (!response.ok) throw new Error(await response.text());
+  if (response.status === 204) return undefined as T;
+  return (await response.json()) as T;
+}

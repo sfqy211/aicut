@@ -15,6 +15,16 @@ export type Source = {
     progressTime: string | null;
     lastError: string | null;
     updatedAt: number;
+    liveInfo?: {
+      living?: boolean;
+      owner?: string;
+      title?: string;
+      avatar?: string;
+      cover?: string;
+    };
+    localCoverPath?: string | null;
+    lastRecordTime?: number | null;
+    lastSessionTitle?: string | null;
   } | null;
 };
 

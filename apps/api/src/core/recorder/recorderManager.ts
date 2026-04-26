@@ -29,6 +29,14 @@ type SourceRow = {
   output_dir: string | null;
 };
 
+type LiveInfoSnapshot = {
+  living?: boolean;
+  owner?: string;
+  title?: string;
+  avatar?: string;
+  cover?: string;
+};
+
 type RuntimeStatus = {
   sourceId: number;
   recorderId: string;
@@ -38,6 +46,10 @@ type RuntimeStatus = {
   progressTime: string | null;
   lastError: string | null;
   updatedAt: number;
+  liveInfo?: LiveInfoSnapshot;
+  localCoverPath?: string | null;
+  lastRecordTime?: number | null;
+  lastSessionTitle?: string | null;
 };
 
 export type RecorderStatus = {
@@ -108,7 +120,43 @@ export function updateRecorderFfmpegPath(nextPath: string) {
 }
 
 export function getSourceRuntime(sourceId: number): RuntimeStatus | null {
-  return runtimeBySource.get(sourceId) ?? null;
+  const runtime = runtimeBySource.get(sourceId);
+  if (!runtime) return null;
+
+  const recorder = manager.getRecorder(runtime.recorderId);
+  const liveInfo = recorder?.liveInfo;
+  const source = getSource(sourceId);
+
+  const snapshot: LiveInfoSnapshot = {
+    living: liveInfo?.living,
+    owner: liveInfo?.owner,
+    title: liveInfo?.title,
+    avatar: liveInfo?.avatar,
+    cover: liveInfo?.cover,
+  };
+
+  let localCoverPath: string | null = null;
+  if (source) {
+    localCoverPath = findLatestLocalCover(source.room_id);
+  }
+
+  // 查询最近一次录制信息
+  const lastSession = row<{ start_time: number; title: string | null }>(
+    getDb().prepare(
+      `SELECT start_time, title FROM sessions
+       WHERE source_id = ? AND status != 'recording'
+       ORDER BY start_time DESC LIMIT 1`
+    ),
+    sourceId
+  );
+
+  return {
+    ...runtime,
+    liveInfo: snapshot,
+    localCoverPath,
+    lastRecordTime: lastSession?.start_time ?? null,
+    lastSessionTitle: lastSession?.title ?? null,
+  };
 }
 
 export function listSourceRuntime(): RuntimeStatus[] {
@@ -524,4 +572,35 @@ function toTimestamp(value: unknown): number {
     return Number.isFinite(timestamp) ? timestamp : Date.now();
   }
   return Date.now();
+}
+
+export function findLatestLocalCover(roomId: string): string | null {
+  const roomDir = path.join(libraryPaths.sources, roomId);
+  if (!fs.existsSync(roomDir)) return null;
+
+  let latestPath: string | null = null;
+  let latestMtime = 0;
+  const stack: string[] = [roomDir];
+
+  try {
+    while (stack.length > 0) {
+      const dir = stack.pop()!;
+      for (const entry of fs.readdirSync(dir)) {
+        const full = path.join(dir, entry);
+        const stat = fs.statSync(full);
+        if (stat.isDirectory()) {
+          stack.push(full);
+        } else if (/\.(jpg|jpeg|png|webp)$/i.test(entry)) {
+          if (stat.mtimeMs > latestMtime) {
+            latestMtime = stat.mtimeMs;
+            latestPath = full;
+          }
+        }
+      }
+    }
+  } catch (_e) {
+    return null;
+  }
+
+  return latestPath;
 }

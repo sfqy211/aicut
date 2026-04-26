@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { getSourceRuntime, startRecorder, stopRecorder } from "../core/recorder/recorderManager.js";
@@ -101,6 +103,28 @@ export const sourcesRoutes: FastifyPluginAsync = async (app) => {
       const message = error instanceof Error ? error.message : String(error);
       return reply.badRequest(`Failed to stop recorder: ${message}`);
     }
+  });
+
+  app.get("/sources/:id/cover", async (request, reply) => {
+    const params = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
+    const source = row<{ room_id: string }>(getDb().prepare("SELECT room_id FROM sources WHERE id = ?"), params.id);
+    if (!source) return reply.notFound("Source not found");
+
+    const { findLatestLocalCover } = await import("../core/recorder/recorderManager.js");
+    const coverPath = findLatestLocalCover(source.room_id);
+    if (!coverPath || !fs.existsSync(coverPath)) {
+      return reply.notFound("Cover not found");
+    }
+
+    const ext = path.extname(coverPath).toLowerCase();
+    const mime: Record<string, string> = {
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".png": "image/png",
+      ".webp": "image/webp",
+    };
+    reply.header("content-type", mime[ext] || "application/octet-stream");
+    return reply.send(fs.createReadStream(coverPath));
   });
 
   app.delete("/sources/:id", async (request, reply) => {
