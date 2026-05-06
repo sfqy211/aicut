@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import WebSocket from "ws";
-import { getDb } from "../db/index.js";
+import { getDb, row } from "../db/index.js";
 import { setSettings, refreshSettings } from "../db/dbSettings.js";
 
 const BIGMODEL_ASR_URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async";
@@ -32,20 +32,10 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
       llm_model: { value: null, updatedAt: 0 },
       asr_api_key: { value: null, updatedAt: 0 },
       asr_resource_id: { value: "volc.seedasr.sauc.duration", updatedAt: 0 },
-      bilibili_cookie: { value: null, updatedAt: 0 },
     };
 
     for (const setting of settings) {
-      if (
-        setting.key === "llm_api_key" ||
-        setting.key === "asr_api_key" ||
-        setting.key === "bilibili_cookie"
-      ) {
-        result[setting.key] = {
-          value: setting.value ? "******" : null,
-          updatedAt: setting.updated_at,
-        };
-      } else if (result[setting.key]) {
+      if (result[setting.key]) {
         result[setting.key] = {
           value: setting.value,
           updatedAt: setting.updated_at,
@@ -269,16 +259,13 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
 
     // code: 0=成功, 86101=未扫码, 86090=已扫码未确认, 86038=已过期
     if (data.code === 0) {
-      // 登录成功，从响应头提取 Cookie 并保存
       const setCookies = response.headers.getSetCookie();
       if (setCookies.length > 0) {
         const cookieStr = setCookies
           .map((c) => c.split(";")[0])
           .join("; ");
-        setSettings({ bilibili_cookie: cookieStr });
-        refreshSettings();
 
-        // 立即获取账号信息并返回
+        // 获取账号信息并写入 bilibili_accounts 表
         try {
           const navRes = await fetch("https://api.bilibili.com/x/web-interface/nav", {
             headers: { Cookie: cookieStr },
@@ -288,6 +275,28 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
             data?: { uname?: string; face?: string; mid?: number };
           };
           if (navData.code === 0 && navData.data) {
+            const uid = navData.data.mid ?? 0;
+            const db = getDb();
+
+            // 如果是第一个账号，设为 active
+            const existingCount = row<{ count: number }>(
+              db.prepare("SELECT COUNT(*) as count FROM bilibili_accounts")
+            )?.count ?? 0;
+
+            db.prepare(
+              `INSERT INTO bilibili_accounts (uid, uname, face, cookie, is_active, updated_at)
+               VALUES (@uid, @uname, @face, @cookie, @isActive, unixepoch())
+               ON CONFLICT(uid) DO UPDATE SET
+                 uname = excluded.uname, face = excluded.face,
+                 cookie = excluded.cookie, updated_at = unixepoch()`
+            ).run({
+              uid,
+              uname: navData.data.uname ?? "",
+              face: navData.data.face ?? "",
+              cookie: cookieStr,
+              isActive: existingCount === 0 ? 1 : 0,
+            });
+
             return {
               code: 0,
               data: data.data,
@@ -295,7 +304,7 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
                 logged_in: true,
                 uname: navData.data.uname ?? "",
                 face: navData.data.face ?? "",
-                uid: navData.data.mid ?? 0,
+                uid,
               },
             };
           }
@@ -306,46 +315,48 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     return { code: data.code, data: data.data };
   });
 
-  // B站账号信息
-  app.get("/settings/bilibili/account", async () => {
+  // B站账号列表
+  app.get("/settings/bilibili/accounts", async () => {
     const db = getDb();
-    const setting = db.prepare("SELECT value FROM settings WHERE key = 'bilibili_cookie'").get() as
-      | { value: string }
-      | undefined;
-    const cookie = setting?.value;
+    const accounts = db.prepare(
+      "SELECT uid, uname, face, is_active, created_at FROM bilibili_accounts ORDER BY created_at ASC"
+    ).all() as Array<{ uid: number; uname: string; face: string; is_active: number; created_at: number }>;
 
-    if (!cookie) {
-      return { logged_in: false };
-    }
-
-    try {
-      const response = await fetch("https://api.bilibili.com/x/web-interface/nav", {
-        headers: { Cookie: cookie },
-      });
-      const data = (await response.json()) as {
-        code: number;
-        data?: { uname?: string; face?: string; mid?: number };
-      };
-
-      if (data.code !== 0 || !data.data) {
-        return { logged_in: false };
-      }
-
-      return {
-        logged_in: true,
-        uname: data.data.uname ?? "",
-        face: data.data.face ?? "",
-        uid: data.data.mid ?? 0,
-      };
-    } catch {
-      return { logged_in: false };
-    }
+    return accounts;
   });
 
-  // 退出 B站登录
-  app.post("/settings/bilibili/logout", async () => {
-    setSettings({ bilibili_cookie: "" });
-    refreshSettings();
+  // 切换活跃账号
+  app.post("/settings/bilibili/accounts/:uid/activate", async (request, reply) => {
+    const params = z.object({ uid: z.coerce.number().int().positive() }).parse(request.params);
+    const db = getDb();
+
+    const account = db.prepare("SELECT uid FROM bilibili_accounts WHERE uid = ?").get(params.uid);
+    if (!account) return reply.notFound("Account not found");
+
+    db.prepare("UPDATE bilibili_accounts SET is_active = 0").run();
+    db.prepare("UPDATE bilibili_accounts SET is_active = 1, updated_at = unixepoch() WHERE uid = ?").run(params.uid);
+
+    return { ok: true };
+  });
+
+  // 删除账号
+  app.delete("/settings/bilibili/accounts/:uid", async (request, reply) => {
+    const params = z.object({ uid: z.coerce.number().int().positive() }).parse(request.params);
+    const db = getDb();
+
+    const account = db.prepare("SELECT uid, is_active FROM bilibili_accounts WHERE uid = ?").get(params.uid) as { uid: number; is_active: number } | undefined;
+    if (!account) return reply.notFound("Account not found");
+
+    db.prepare("DELETE FROM bilibili_accounts WHERE uid = ?").run(params.uid);
+
+    // 如果删除的是 active account，自动激活第一个剩余账号
+    if (account.is_active) {
+      const first = db.prepare("SELECT uid FROM bilibili_accounts ORDER BY created_at ASC LIMIT 1").get() as { uid: number } | undefined;
+      if (first) {
+        db.prepare("UPDATE bilibili_accounts SET is_active = 1 WHERE uid = ?").run(first.uid);
+      }
+    }
+
     return { ok: true };
   });
 };

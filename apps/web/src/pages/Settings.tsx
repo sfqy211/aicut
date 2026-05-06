@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiGet, apiPatch, apiPost } from "../api/client";
+import { apiDelete, apiGet, apiPatch, apiPost } from "../api/client";
 import type { SettingsMap } from "../types";
+import { Eye, EyeOff, Plus, Star, Trash2, X } from "lucide-react";
 
 type BilibiliAccount = {
-  logged_in: boolean;
+  uid: number;
   uname: string;
   face: string;
-  uid: number;
+  is_active: number;
+  created_at: number;
 };
 
 export function Settings() {
@@ -14,15 +16,17 @@ export function Settings() {
   const [llmForm, setLlmForm] = useState({ baseUrl: "", apiKey: "", model: "" });
   const [asrForm, setAsrForm] = useState({ apiKey: "", resourceId: "" });
   const [saving, setSaving] = useState<"llm" | "asr" | null>(null);
+  const [showKeys, setShowKeys] = useState(false);
   const [llmTestResult, setLlmTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [asrTestResult, setAsrTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
-  // Bilibili QR login state
+  // Bilibili multi-account state
+  const [accounts, setAccounts] = useState<BilibiliAccount[]>([]);
+  const [showQrModal, setShowQrModal] = useState(false);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [qrKey, setQrKey] = useState<string | null>(null);
   const [qrPolling, setQrPolling] = useState(false);
   const [qrStatus, setQrStatus] = useState<string | null>(null);
-  const [account, setAccount] = useState<BilibiliAccount | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   async function refresh() {
@@ -30,19 +34,19 @@ export function Settings() {
     setSettings(nextSettings);
     setLlmForm({
       baseUrl: nextSettings.llm_base_url?.value ?? "",
-      apiKey: "",
+      apiKey: nextSettings.llm_api_key?.value ?? "",
       model: nextSettings.llm_model?.value ?? "",
     });
     setAsrForm({
-      apiKey: "",
+      apiKey: nextSettings.asr_api_key?.value ?? "",
       resourceId: nextSettings.asr_resource_id?.value ?? "volc.seedasr.sauc.duration",
     });
-    // Fetch account info
+    // Fetch accounts
     try {
-      const acc = await apiGet<BilibiliAccount>("/api/settings/bilibili/account");
-      setAccount(acc.logged_in ? acc : null);
+      const accs = await apiGet<BilibiliAccount[]>("/api/settings/bilibili/accounts");
+      setAccounts(accs);
     } catch {
-      setAccount(null);
+      setAccounts([]);
     }
   }
 
@@ -104,6 +108,8 @@ export function Settings() {
     setLlmForm({ baseUrl: "https://api.xiaomimimo.com/v1", apiKey: "", model: "mimo-v2.5-pro" });
   }
 
+  // --- QR Modal ---
+
   const stopPolling = useCallback(() => {
     setQrPolling(false);
     if (pollTimer.current) {
@@ -112,7 +118,17 @@ export function Settings() {
     }
   }, []);
 
-  async function startQrLogin() {
+  const openQrModal = useCallback(() => {
+    setShowQrModal(true);
+    setQrUrl(null);
+    setQrKey(null);
+    setQrStatus(null);
+    stopPolling();
+    // 自动获取二维码
+    void doStartQrLogin();
+  }, [stopPolling]);
+
+  async function doStartQrLogin() {
     setQrUrl(null);
     setQrKey(null);
     setQrStatus(null);
@@ -138,15 +154,14 @@ export function Settings() {
       if (res.code === 0) {
         stopPolling();
         setQrStatus("登录成功");
-        setQrUrl(null);
-        setQrKey(null);
-        // 直接使用 poll 响应中的账号信息，避免二次请求时序问题
-        if (res.account?.logged_in) {
-          setAccount(res.account);
-        }
+        // 关闭弹窗，刷新账号列表
+        setTimeout(() => {
+          setShowQrModal(false);
+          void refresh();
+        }, 800);
       } else if (res.code === 86038) {
         stopPolling();
-        setQrStatus("二维码已过期，请重新获取");
+        setQrStatus("二维码已过期，请刷新");
       } else if (res.code === 86090) {
         setQrStatus("已扫码，请在手机上确认");
       } else if (res.code === 86101) {
@@ -160,16 +175,14 @@ export function Settings() {
     }
   }
 
-  async function logoutBilibili() {
-    try {
-      await apiPost("/api/settings/bilibili/logout", {});
-      setAccount(null);
-      setQrUrl(null);
-      setQrKey(null);
-      setQrStatus(null);
-    } catch {
-      // ignore
-    }
+  async function activateAccount(uid: number) {
+    await apiPost(`/api/settings/bilibili/accounts/${uid}/activate`, {});
+    await refresh();
+  }
+
+  async function deleteAccount(uid: number) {
+    await apiDelete(`/api/settings/bilibili/accounts/${uid}`);
+    await refresh();
   }
 
   return (
@@ -196,13 +209,18 @@ export function Settings() {
           </label>
           <label className="form-group">
             <span className="form-label">API Key</span>
-            <input
-              className="form-input"
-              value={llmForm.apiKey}
-              onChange={(event) => setLlmForm((current) => ({ ...current, apiKey: event.target.value }))}
-              placeholder={settings?.llm_api_key?.value ? "已配置，留空则保持不变" : "sk-..."}
-              type="password"
-            />
+            <div className="form-input-with-action">
+              <input
+                className="form-input"
+                value={llmForm.apiKey}
+                onChange={(event) => setLlmForm((current) => ({ ...current, apiKey: event.target.value }))}
+                placeholder="sk-..."
+                type={showKeys ? "text" : "password"}
+              />
+              <button className="btn btn-ghost btn-sm key-toggle" onClick={() => setShowKeys((v) => !v)} title={showKeys ? "隐藏" : "显示"}>
+                {showKeys ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
           </label>
           <label className="form-group">
             <span className="form-label">Model</span>
@@ -225,7 +243,6 @@ export function Settings() {
                 {llmTestResult.msg}
               </span>
             )}
-            {settings?.llm_api_key?.value && <span className="text-muted">API Key 已存在，页面不会回显明文。</span>}
           </div>
         </div>
       </section>
@@ -238,13 +255,18 @@ export function Settings() {
         <div className="panel-body settings-stack">
           <label className="form-group">
             <span className="form-label">API Key</span>
-            <input
-              className="form-input"
-              value={asrForm.apiKey}
-              onChange={(e) => setAsrForm((f) => ({ ...f, apiKey: e.target.value }))}
-              placeholder={settings?.asr_api_key?.value ? "已配置，留空则保持不变" : "火山引擎控制台获取"}
-              type="password"
-            />
+            <div className="form-input-with-action">
+              <input
+                className="form-input"
+                value={asrForm.apiKey}
+                onChange={(e) => setAsrForm((f) => ({ ...f, apiKey: e.target.value }))}
+                placeholder="火山引擎控制台获取"
+                type={showKeys ? "text" : "password"}
+              />
+              <button className="btn btn-ghost btn-sm key-toggle" onClick={() => setShowKeys((v) => !v)} title={showKeys ? "隐藏" : "显示"}>
+                {showKeys ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
           </label>
           <label className="form-group">
             <span className="form-label">Resource ID</span>
@@ -270,54 +292,86 @@ export function Settings() {
                 {asrTestResult.msg}
               </span>
             )}
-            {settings?.asr_api_key?.value && <span className="text-muted">API Key 已存在，页面不会回显明文。</span>}
           </div>
         </div>
       </section>
 
       <section className="panel">
         <div className="panel-header">
-          <span className="panel-title">B站登录</span>
-          <span className="tag">BILIBILI</span>
+          <span className="panel-title">B站账号</span>
+          <span className="tag">{accounts.length} 个账号</span>
         </div>
         <div className="panel-body settings-stack">
-          {account ? (
-            <div className="settings-bilibili-account">
-              <img src={account.face} alt={account.uname} className="bilibili-avatar" />
-              <span className="bilibili-username">{account.uname}</span>
-              <button className="btn btn-sm" onClick={logoutBilibili}>
-                退出登录
+          {accounts.length === 0 ? (
+            <div className="text-muted" style={{ fontSize: 13 }}>暂无已登录账号</div>
+          ) : (
+            <div className="account-list">
+              {accounts.map((acc) => (
+                <div key={acc.uid} className={`account-item ${acc.is_active ? "active" : ""}`}>
+                  <div className="account-info">
+                    <span className="account-name">{acc.uname || `UID ${acc.uid}`}</span>
+                    <span className="account-uid mono">UID: {acc.uid}</span>
+                    {acc.is_active ? (
+                      <span className="tag" style={{ background: "var(--accent)", color: "#fff", fontSize: 10 }}>当前使用</span>
+                    ) : null}
+                  </div>
+                  <div className="account-actions">
+                    {!acc.is_active && (
+                      <button className="btn btn-sm btn-ghost" onClick={() => activateAccount(acc.uid)} title="切换为此账号">
+                        <Star size={13} /> 切换
+                      </button>
+                    )}
+                    <button className="btn btn-sm btn-ghost" onClick={() => deleteAccount(acc.uid)} title="删除账号">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <button className="btn btn-primary" onClick={openQrModal}>
+            <Plus size={14} /> 添加账号
+          </button>
+        </div>
+      </section>
+
+      {/* QR 登录浮窗 */}
+      {showQrModal && (
+        <div className="modal-overlay" onClick={() => { setShowQrModal(false); stopPolling(); }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">扫码登录 B 站</span>
+              <button className="btn btn-ghost btn-sm" onClick={() => { setShowQrModal(false); stopPolling(); }}>
+                <X size={16} />
               </button>
             </div>
-          ) : (
-            <>
-              {!qrUrl && (
-                <button className="btn btn-primary" onClick={startQrLogin} disabled={qrPolling}>
-                  扫码登录
-                </button>
-              )}
-              {qrUrl && (
-                <div className="settings-qr">
+            <div className="modal-body">
+              {qrUrl ? (
+                <>
                   <img
                     src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrUrl)}`}
                     alt="B站登录二维码"
                     className="qr-image"
                   />
-                  <div className="settings-qr-status">
+                  <div className="qr-status">
                     {qrPolling && !qrStatus && "等待扫码..."}
                     {qrStatus && <span>{qrStatus}</span>}
                   </div>
                   {qrStatus !== "登录成功" && (
-                    <button className="btn btn-sm" onClick={startQrLogin}>
+                    <button className="btn btn-sm" onClick={doStartQrLogin}>
                       刷新二维码
                     </button>
                   )}
+                </>
+              ) : (
+                <div className="text-muted">
+                  {qrStatus ?? "正在获取二维码..."}
                 </div>
               )}
-            </>
-          )}
+            </div>
+          </div>
         </div>
-      </section>
+      )}
     </div>
   );
 }

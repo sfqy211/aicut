@@ -31,9 +31,13 @@ export function getAsrResourceId(): string {
   return readSetting("asr_resource_id") || "volc.seedasr.sauc.duration";
 }
 
-/** B站 Cookie（全局 fallback，优先级低于 source 级别的 cookie） */
+/** B站 Cookie（active account，优先级低于 source 级别的 cookie） */
 export function getBilibiliCookie(): string {
-  return readSetting("bilibili_cookie");
+  const db = getDb();
+  const account = row<{ cookie: string }>(
+    db.prepare("SELECT cookie FROM bilibili_accounts WHERE is_active = 1 LIMIT 1")
+  );
+  return account?.cookie ?? "";
 }
 
 /** LLM API Key */

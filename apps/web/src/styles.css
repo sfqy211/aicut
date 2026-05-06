@@ -101,14 +101,24 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   width: 56px;
 }
 
-.brand {
+.sidebar-toggle {
   height: 56px;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 20px;
+  padding: 0;
+  border: none;
   border-bottom: 1px solid var(--border);
-  gap: 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.sidebar-toggle:hover {
+  color: var(--text-primary);
+  background: var(--accent-dim);
 }
 
 .sidebar.collapsed .brand {
@@ -174,12 +184,11 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .nav-item svg { width: 18px; height: 18px; }
 
 .sidebar-footer {
-  padding: 16px;
   border-top: 1px solid var(--border);
 }
 
 .sidebar.collapsed .sidebar-footer {
-  padding: 8px;
+  padding: 0;
 }
 
 .status-dot {
@@ -197,24 +206,24 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 
 .theme-toggle-btn {
   width: 100%;
-  padding: 8px;
+  padding: 12px 8px;
   font-size: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
   background: var(--bg-tertiary);
-  border: 1px solid var(--border);
+  border: none;
   color: var(--text-secondary);
 }
 
 .theme-toggle-btn.icon-only {
-  padding: 8px;
+  padding: 12px 0;
 }
 
 .theme-toggle-btn:hover {
   color: var(--text-primary);
-  border-color: var(--accent);
+  background: var(--accent-dim);
 }
 
 /* Main Content */
@@ -253,6 +262,12 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   color: var(--text-primary);
   border-color: var(--accent);
   background: var(--accent-dim);
+}
+
+.collapse-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+  pointer-events: none;
 }
 
 .topbar-title {
@@ -397,6 +412,25 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   padding: 8px 12px;
   min-width: 160px;
   font-size: 13px;
+}
+
+.form-input-with-action {
+  display: flex;
+  gap: 0;
+}
+
+.form-input-with-action .form-input {
+  flex: 1;
+  min-width: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.key-toggle {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: none;
+  flex-shrink: 0;
 }
 
 /* Buttons */
@@ -1068,7 +1102,129 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .settings-hint {
   font-size: 12px;
   color: var(--text-secondary);
-  line-height: 1.5;
+}
+
+.settings-bilibili-account {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.bilibili-username {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.bilibili-uid {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* Account List */
+.account-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.account-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.account-item:last-child {
+  border-bottom: none;
+}
+
+.account-item.active {
+  background: var(--accent-dim);
+  border-left: 2px solid var(--accent);
+}
+
+.account-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.account-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.account-uid {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.account-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* QR Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 320px;
+  max-width: 90vw;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 20px;
+}
+
+.qr-image {
+  width: 200px;
+  height: 200px;
+  border-radius: 4px;
+  background: #fff;
+  padding: 8px;
+}
+
+.qr-status {
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: center;
 }
 
 .settings-storage {
