@@ -12,20 +12,24 @@ const CLIENT_AUDIO_ONLY = 0b0010;
 const SERVER_FULL_RESPONSE = 0b1001;
 const SERVER_ERROR = 0b1111;
 
+// 音频帧 flags：官方示例中普通音频包不带 sequence number
+const FLAG_NONE = 0b0000;
+const FLAG_LAST_NO_SEQ = 0b0010; // 最后一包，无 sequence
 const FLAG_POS_SEQ = 0b0001;
-const FLAG_NEG_WITH_SEQ = 0b0011;
 
 const SERIAL_NONE = 0b0000;
 const SERIAL_JSON = 0b0001;
 const COMP_GZIP = 0b0001;
 
-const BIGMODEL_ASR_URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel";
+// 双向流式优化版（推荐）：仅在结果变化时返回，性能更优
+const BIGMODEL_ASR_URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async";
 
 // ── 类型定义 ──
 
 export interface VolcengineAsrConfig {
-  appKey: string;
-  accessKey: string;
+  apiKey: string;
+  /** 资源 ID，默认 volc.seedasr.sauc.duration（豆包2.0小时版） */
+  resourceId?: string;
 }
 
 export interface AsrUtterance {
@@ -59,25 +63,29 @@ function buildHeader(messageType: number, flags: number, serial: number, compres
   return buf;
 }
 
+/**
+ * Full Client Request：Header + PayloadSize + Payload(JSON gzip)
+ * 官方示例中 flags=0b0000（无 sequence number）
+ */
 function buildFullRequest(config: object): Buffer {
-  const header = buildHeader(CLIENT_FULL_REQUEST, FLAG_POS_SEQ, SERIAL_JSON, COMP_GZIP);
+  const header = buildHeader(CLIENT_FULL_REQUEST, FLAG_NONE, SERIAL_JSON, COMP_GZIP);
   const compressed = gzipSync(Buffer.from(JSON.stringify(config)));
-  const seqBuf = Buffer.alloc(4);
-  seqBuf.writeInt32BE(1);
   const sizeBuf = Buffer.alloc(4);
   sizeBuf.writeUInt32BE(compressed.length);
-  return Buffer.concat([header, seqBuf, sizeBuf, compressed]);
+  return Buffer.concat([header, sizeBuf, compressed]);
 }
 
-function buildAudioRequest(audioData: Buffer, sequence: number, isLast: boolean): Buffer {
-  const flags = isLast ? FLAG_NEG_WITH_SEQ : FLAG_POS_SEQ;
+/**
+ * Audio-Only Request：Header + PayloadSize + Payload(audio gzip)
+ * 普通帧 flags=0b0000，最后一帧 flags=0b0010
+ */
+function buildAudioRequest(audioData: Buffer, isLast: boolean): Buffer {
+  const flags = isLast ? FLAG_LAST_NO_SEQ : FLAG_NONE;
   const header = buildHeader(CLIENT_AUDIO_ONLY, flags, SERIAL_NONE, COMP_GZIP);
   const compressed = gzipSync(audioData);
-  const seqBuf = Buffer.alloc(4);
-  seqBuf.writeInt32BE(isLast ? -sequence : sequence);
   const sizeBuf = Buffer.alloc(4);
   sizeBuf.writeUInt32BE(compressed.length);
-  return Buffer.concat([header, seqBuf, sizeBuf, compressed]);
+  return Buffer.concat([header, sizeBuf, compressed]);
 }
 
 // ── 响应解析 ──
@@ -86,6 +94,7 @@ interface ParsedResponse {
   code?: number;
   message?: string;
   result?: AsrResult;
+  audio_info?: { duration?: number };
   error?: boolean;
 }
 
@@ -126,14 +135,15 @@ function parseResponse(data: Buffer): ParsedResponse {
 
 export class VolcengineAsrSession {
   private ws: WebSocket | null = null;
-  private seq = 2; // 1 已用于 config
   private closed = false;
   private events: VolcengineAsrEvents;
+  private requestId: string;
 
   constructor(
-    private config: VolcengineAsrConfig,
+    private volcConfig: VolcengineAsrConfig,
     events: Partial<VolcengineAsrEvents> = {},
   ) {
+    this.requestId = crypto.randomUUID();
     this.events = {
       onResult: events.onResult ?? (() => {}),
       onError: events.onError ?? (() => {}),
@@ -144,21 +154,21 @@ export class VolcengineAsrSession {
 
   start(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const requestId = crypto.randomUUID();
+      const resourceId = this.volcConfig.resourceId ?? "volc.seedasr.sauc.duration";
 
       this.ws = new WebSocket(BIGMODEL_ASR_URL, {
         headers: {
-          "X-Api-App-Key": this.config.appKey,
-          "X-Api-Access-Key": this.config.accessKey,
-          "X-Api-Resource-Id": "volc.bigasr.sauc.duration",
-          "X-Api-Request-Id": requestId,
+          "X-Api-Key": this.volcConfig.apiKey,
+          "X-Api-Resource-Id": resourceId,
+          "X-Api-Connect-Id": this.requestId,
+          "X-Api-Sequence": "-1",
         },
       });
 
       this.ws.on("open", () => {
-        // 发送配置帧
+        // 发送配置帧（Full Client Request）
         const fullConfig = {
-          user: { uid: `aicut-${requestId.slice(0, 8)}` },
+          user: { uid: `aicut-${this.requestId.slice(0, 8)}` },
           audio: { format: "pcm", rate: 16000, bits: 16, channel: 1, codec: "raw" },
           request: {
             model_name: "bigmodel",
@@ -181,7 +191,8 @@ export class VolcengineAsrSession {
             this.events.onError(new Error(`ASR error ${result.code}: ${result.message}`));
             return;
           }
-          if (result.code === 1000 && result.result) {
+          // 成功响应：code 20000000（官方文档）或 1000（部分实现）
+          if ((result.code === 20000000 || result.code === 1000) && result.result) {
             const hasFinal = result.result.utterances?.some((u) => u.definite);
             this.events.onResult(result.result, !!hasFinal);
           }
@@ -203,21 +214,20 @@ export class VolcengineAsrSession {
 
   sendAudio(pcmChunk: Buffer): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || this.closed) return;
-    this.ws.send(buildAudioRequest(pcmChunk, this.seq, false));
-    this.seq++;
+    this.ws.send(buildAudioRequest(pcmChunk, false));
   }
 
   close(): void {
     if (this.closed) return;
     this.closed = true;
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      // 发送最后一帧
-      this.ws.send(buildAudioRequest(Buffer.alloc(0), this.seq, true));
+      // 发送最后一帧（空数据 + last flag）
+      this.ws.send(buildAudioRequest(Buffer.alloc(0), true));
       // 延迟关闭，等待最终结果
       setTimeout(() => {
         this.ws?.close();
         this.ws = null;
-      }, 1000);
+      }, 2000);
     }
   }
 

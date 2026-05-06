@@ -32,8 +32,8 @@ export async function startAsrStream(
 
   const asrSession = new VolcengineAsrSession(
     {
-      appKey: config.volcengineAppKey,
-      accessKey: config.volcengineAccessKey,
+      apiKey: config.volcengineApiKey,
+      resourceId: config.volcengineResourceId,
     },
     {
       onOpen: () => {

@@ -17,6 +17,6 @@ export const config = {
   libraryRoot: resolveFromRoot(process.env.AICUT_LIBRARY_ROOT ?? "./library"),
   ffmpegPath: process.env.AICUT_FFMPEG_PATH ?? "ffmpeg",
   recorderSegment: process.env.AICUT_RECORDER_SEGMENT ?? "30",
-  volcengineAppKey: process.env.AICUT_VOLCENGINE_APP_KEY ?? "",
-  volcengineAccessKey: process.env.AICUT_VOLCENGINE_ACCESS_KEY ?? "",
+  volcengineApiKey: process.env.AICUT_VOLCENGINE_API_KEY ?? "",
+  volcengineResourceId: process.env.AICUT_VOLCENGINE_RESOURCE_ID ?? "volc.seedasr.sauc.duration",
 };
