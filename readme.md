@@ -9,7 +9,6 @@ AICut 是一个面向个人切片师的本机 Web 工具，目标是把 B 站直
 ```
 apps/api          # Fastify + SQLite 本地后端
 apps/web          # React + Vite 控制台
-services/asr-worker  # Python FastAPI ASR worker
 ```
 
 ## 配置文件
@@ -42,13 +41,4 @@ pnpm dev:split
 # 或单独启动
 pnpm dev:api   # API 服务 (http://127.0.0.1:43110)
 pnpm dev:web   # Web 服务 (http://127.0.0.1:43111)
-pnpm dev:asr   # ASR 服务 (http://127.0.0.1:43112)
-```
-
-### Python 依赖
-
-```powershell
-cd services/asr-worker
-python -m venv .venv
-.\.venv\Scripts\pip install -r requirements.txt
 ```

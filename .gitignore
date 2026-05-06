@@ -20,8 +20,4 @@ data/
 # 用户配置文件（包含敏感信息）
 config/
 
-services/asr-worker/.venv/
-services/asr-worker/__pycache__/
-services/asr-worker/models/
-
 reference/

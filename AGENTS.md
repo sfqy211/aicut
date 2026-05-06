@@ -1,42 +1,33 @@
 # AGENTS.md
 
-AICut — B 站直播切片本地工具。三服务 monorepo：API (Fastify+SQLite)、Web (React+Vite)、ASR Worker (Python FastAPI+SenseVoice)。
+AICut — B 站直播切片本地工具。双服务 monorepo：API (Fastify+SQLite)、Web (React+Vite)。ASR 使用火山引擎在线服务。
 
 ## Commands
 
 | Command | Notes |
 |---------|-------|
-| `pnpm install` | Node deps only; Python venv is separate |
-| `pnpm check:env` | Verifies node/pnpm/python/ffmpeg, creates `library/` dirs |
-| `pnpm dev` | All 3 services in one terminal |
+| `pnpm install` | Node deps only |
+| `pnpm check:env` | Verifies node/pnpm/ffmpeg, creates `library/` dirs |
+| `pnpm dev` | All services in one terminal |
 | `pnpm dev:split` | Each service in its own PowerShell window |
 | `pnpm dev:api` | API only — 127.0.0.1:43110 |
 | `pnpm dev:web` | Web only — 127.0.0.1:43111, proxies `/api` → backend |
-| `pnpm dev:asr` | ASR Worker only — 127.0.0.1:43112 |
-| `pnpm build` | `apps/**` only — ASR worker is not built |
+| `pnpm build` | `apps/**` only |
 | `pnpm typecheck` | `apps/**` only — `--noEmit` |
 | `pnpm lint` | Identical to `typecheck` (no ESLint) |
 | `pnpm format` | Prettier across whole repo |
-
-Python ASR deps (one-time):
-```
-cd services/asr-worker
-python -m venv .venv
-.\.venv\Scripts\pip install -r requirements.txt
-```
 
 ## Structure
 
 ```
 apps/api/              @aicut/api   Fastify + node:sqlite, Node 22+
 apps/web/              @aicut/web   React 19 + Vite + TailwindCSS
-services/asr-worker/   (outside pnpm workspace)  Python FastAPI + SenseVoice
 config/                gitignored — cookie.json, keywords.json, prompts.json
 library/               gitignored — runtime data (db, sources, transcripts, exports)
 ```
 
-- `pnpm-workspace.yaml` only includes `apps/*` — ASR worker is outside the workspace
-- `pnpm build`/`typecheck`/`lint` filter `./apps/**`, skip `services/`
+- `pnpm-workspace.yaml` only includes `apps/*`
+- `pnpm build`/`typecheck`/`lint` filter `./apps/**`
 - API dev uses `tsx watch` (no compile step during development)
 
 ## Key Constraints
@@ -47,10 +38,10 @@ library/               gitignored — runtime data (db, sources, transcripts, ex
 - **No test suite** — there are no tests; `lint` = `typecheck`
 - **`config/` is gitignored** — contains `cookie.json` (B站 login), `keywords.json`, `prompts.json`; first-time setup needs `config/cookie.json` (see `cookie.example.json`)
 - **`library/` is gitignored** — runtime output dir; `check:env` creates the subdirectory structure
-- **ASR Worker runs in its own venv** — not managed by pnpm; `AICUT_PYTHON` env var overrides the python binary used by `dev.js`/`dev-asr.js`
 - **HLS routes live in `core/hls/`** — not in `routes/`; registered directly in `index.ts`
 - **EventBus** (`events/bus.ts`) is the sole real-time channel; frontend consumes via SSE at `/api/events/stream`
 - **Transcript timestamps are global seconds** from session start, drift-calibrated — map directly to player `currentTime`
+- **ASR 使用火山引擎（豆包）在线服务** — `src/core/asr/volcengineAsr.ts` 实现 WebSocket 二进制协议；`src/core/asr/index.ts` 管理 ffmpeg 音频转码 + ASR 会话生命周期；需要 `AICUT_VOLCENGINE_APP_KEY` 和 `AICUT_VOLCENGINE_ACCESS_KEY` 环境变量
 
 ## API Internals
 
@@ -58,7 +49,7 @@ library/               gitignored — runtime data (db, sources, transcripts, ex
 - `config.ts`: all env vars with defaults; paths resolved relative to repo root
 - `src/core/recorder/`: HLS direct recording engine (`engine.ts` + `hlsDownloader.ts` + `playlist.ts`). Uses `@bililive-tools/bilibili-recorder` only for stream URL resolution (`biliApi.ts`) and danmaku listening (`danmuClient.ts`); actual recording is custom HLS segment download via ffmpeg. `recorderManager.ts` is a thin re-export from `engine.ts`.
 - `src/core/hls/`: serves recorded `.ts` segments as dynamic m3u8 playlists — zero transmux
-- `src/core/asr/`: `streamClient.ts` manages HTTP+SSE to Python ASR Worker
+- `src/core/asr/`: 火山引擎在线 ASR。`volcengineAsr.ts` 是 WebSocket 二进制协议客户端；`index.ts` 管理 ffmpeg 音频转码（HLS→PCM 16kHz）→ WebSocket 发送 → EventBus 结果推送
 - `src/core/analysis/`: scoring pipeline — stats → rules → optional LLM → candidates
 - `src/core/export/`: ffmpeg-based rough cut export with SRT generation
 - `src/routes/`: sources, sessions, candidates, exports, settings, events — Zod validation
