@@ -144,21 +144,3 @@ export type DanmakuEvent = {
 };
 
 export type SettingsMap = Record<string, { value: string | null; updatedAt: number }>;
-
-export type SystemSettings = {
-  sources: number;
-  sessions: number;
-  segments: number;
-  candidates: number;
-  exports: number;
-  pendingCandidates: number;
-  approvedCandidates: number;
-  ffmpegPath: string;
-  libraryRoot: string;
-  disk: {
-    totalBytes: number;
-    freeBytes: number;
-    usedBytes: number;
-    usagePercent: number;
-  };
-};

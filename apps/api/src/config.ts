@@ -12,5 +12,5 @@ export const config = {
   port: 43110,
   dbPath: resolveFromRoot("./library/aicut.db"),
   libraryRoot: resolveFromRoot("./library"),
-  ffmpegPath: "ffmpeg",
+  ffmpegPath: path.join(repoRoot, "bin", "ffmpeg.exe"),
 };

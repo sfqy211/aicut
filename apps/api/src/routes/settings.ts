@@ -1,25 +1,11 @@
-import fs from "node:fs";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import crypto from "node:crypto";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
-import { config } from "../config.js";
-import { getDb, row } from "../db/index.js";
+import WebSocket from "ws";
+import { getDb } from "../db/index.js";
 import { setSettings, refreshSettings } from "../db/dbSettings.js";
-import { updateRecorderFfmpegPath } from "../core/recorder/recorderManager.js";
 
-const execFileAsync = promisify(execFile);
-
-const llmConfigInput = z.object({
-  apiFormat: z.enum(["openai", "anthropic"]).optional(),
-  baseUrl: z.string().url().optional(),
-  apiKey: z.string().min(1).optional(),
-  model: z.string().min(1).optional(),
-});
-
-const runtimeConfigInput = z.object({
-  ffmpegPath: z.string().min(1).optional(),
-});
+const BIGMODEL_ASR_URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async";
 
 const asrConfigInput = z.object({
   apiKey: z.string().optional(),
@@ -31,7 +17,7 @@ const cookieConfigInput = z.object({
 });
 
 export const settingsRoutes: FastifyPluginAsync = async (app) => {
-  // 获取所有设置
+  // 获取设置（简化版）
   app.get("/settings", async () => {
     const db = getDb();
     const settings = db.prepare("SELECT key, value, updated_at FROM settings ORDER BY key").all() as Array<{
@@ -41,19 +27,20 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     }>;
 
     const result: Record<string, { value: string | null; updatedAt: number }> = {
-      llm_api_format: { value: "openai", updatedAt: 0 },
-      llm_base_url: { value: null, updatedAt: 0 },
       llm_api_key: { value: null, updatedAt: 0 },
+      llm_base_url: { value: null, updatedAt: 0 },
       llm_model: { value: null, updatedAt: 0 },
-      ffmpeg_path: { value: config.ffmpegPath, updatedAt: 0 },
       asr_api_key: { value: null, updatedAt: 0 },
       asr_resource_id: { value: "volc.seedasr.sauc.duration", updatedAt: 0 },
       bilibili_cookie: { value: null, updatedAt: 0 },
     };
 
     for (const setting of settings) {
-      // 不返回敏感字段的完整值
-      if (setting.key === "llm_api_key" || setting.key === "asr_api_key" || setting.key === "bilibili_cookie") {
+      if (
+        setting.key === "llm_api_key" ||
+        setting.key === "asr_api_key" ||
+        setting.key === "bilibili_cookie"
+      ) {
         result[setting.key] = {
           value: setting.value ? "******" : null,
           updatedAt: setting.updated_at,
@@ -69,100 +56,158 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     return result;
   });
 
-  // 更新 LLM 配置
+  // 保存 LLM 配置
   app.patch("/settings/llm", async (request) => {
-    const input = llmConfigInput.parse(request.body);
-    const db = getDb();
+    const input = z.object({
+      baseUrl: z.string().optional(),
+      apiKey: z.string().optional(),
+      model: z.string().optional(),
+    }).parse(request.body);
 
-    const updates: string[] = [];
-    const values: Record<string, string> = {};
+    const entries: Record<string, string> = {};
+    if (input.baseUrl !== undefined) entries.llm_base_url = input.baseUrl;
+    if (input.apiKey !== undefined) entries.llm_api_key = input.apiKey;
+    if (input.model !== undefined) entries.llm_model = input.model;
 
-    if (input.apiFormat !== undefined) {
-      updates.push("llm_api_format = @apiFormat");
-      values.apiFormat = input.apiFormat;
-    }
+    if (Object.keys(entries).length === 0) return { updated: false };
 
-    if (input.baseUrl !== undefined) {
-      updates.push("llm_base_url = @baseUrl");
-      values.baseUrl = input.baseUrl;
-    }
-
-    if (input.apiKey !== undefined) {
-      updates.push("llm_api_key = @apiKey");
-      values.apiKey = input.apiKey;
-    }
-
-    if (input.model !== undefined) {
-      updates.push("llm_model = @model");
-      values.model = input.model;
-    }
-
-    if (updates.length === 0) {
-      return { updated: false };
-    }
-
-    // 使用 upsert
-    const timestamp = Math.floor(Date.now() / 1000);
-
-    for (const [key, val] of Object.entries(values)) {
-      db.prepare(
-        `INSERT INTO settings (key, value, updated_at) VALUES (@key, @value, @timestamp)
-         ON CONFLICT(key) DO UPDATE SET value = @value, updated_at = @timestamp`
-      ).run({
-        key:
-          key === "apiFormat"
-            ? "llm_api_format"
-            : key === "baseUrl"
-              ? "llm_base_url"
-              : key === "apiKey"
-                ? "llm_api_key"
-                : "llm_model",
-        value: val,
-        timestamp,
-      });
-    }
-
-    return { updated: true, fields: Object.keys(values) };
+    setSettings(entries);
+    refreshSettings();
+    return { updated: true, fields: Object.keys(entries) };
   });
 
-  // 更新运行时配置
-  app.patch("/settings/runtime", async (request) => {
-    const input = runtimeConfigInput.parse(request.body);
+  // 测试 LLM 连接
+  app.post("/settings/llm/test", async () => {
     const db = getDb();
-    const timestamp = Math.floor(Date.now() / 1000);
-    const updatedFields: string[] = [];
+    const settings = db.prepare(
+      "SELECT key, value FROM settings WHERE key IN ('llm_api_key', 'llm_base_url', 'llm_model', 'llm_api_format')"
+    ).all() as Array<{ key: string; value: string }>;
 
-    if (input.ffmpegPath !== undefined) {
-      db.prepare(
-        `INSERT INTO settings (key, value, updated_at) VALUES ('ffmpeg_path', @value, @timestamp)
-         ON CONFLICT(key) DO UPDATE SET value = @value, updated_at = @timestamp`
-      ).run({
-        value: input.ffmpegPath,
-        timestamp,
-      });
-      updateRecorderFfmpegPath(input.ffmpegPath);
-      updatedFields.push("ffmpegPath");
+    const configMap: Record<string, string> = {};
+    for (const s of settings) {
+      configMap[s.key] = s.value;
     }
 
-    return {
-      updated: updatedFields.length > 0,
-      fields: updatedFields,
-      effective: {
-        ffmpegPath: config.ffmpegPath,
-      },
-    };
+    const apiKey = configMap.llm_api_key;
+    const baseUrl = configMap.llm_base_url || "https://api.openai.com/v1";
+    const model = configMap.llm_model || "gpt-4o-mini";
+    const apiFormat = configMap.llm_api_format || "openai";
+
+    if (!apiKey) {
+      return { ok: false, error: "LLM API key not configured" };
+    }
+
+    try {
+      let url: string;
+      let headers: Record<string, string>;
+      let body: string;
+
+      if (apiFormat === "anthropic") {
+        url = `${baseUrl}/messages`;
+        headers = {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        };
+        body = JSON.stringify({
+          model,
+          max_tokens: 10,
+          messages: [{ role: "user", content: "回复OK" }],
+        });
+      } else {
+        url = `${baseUrl}/chat/completions`;
+        headers = {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        };
+        body = JSON.stringify({
+          model,
+          max_tokens: 10,
+          messages: [{ role: "user", content: "回复OK" }],
+        });
+      }
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body,
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        return { ok: false, error: `HTTP ${response.status}: ${text.slice(0, 200)}` };
+      }
+
+      const data = (await response.json()) as Record<string, unknown>;
+      let responseText: string;
+      if (apiFormat === "anthropic") {
+        const content = data.content as Array<Record<string, string>> | undefined;
+        responseText = content?.[0]?.text ?? JSON.stringify(data);
+      } else {
+        const choices = data.choices as Array<Record<string, unknown>> | undefined;
+        const msg = choices?.[0]?.message;
+        responseText = msg ? String(typeof msg === "string" ? msg : (msg as Record<string, unknown>).content ?? JSON.stringify(msg)) : JSON.stringify(data);
+      }
+
+      return { ok: true, model, response: responseText };
+    } catch (err: unknown) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   });
 
-  app.post("/settings/runtime/browse-ffmpeg", async (_request, reply) => {
-    const selectedPath = await browseForFfmpeg();
-    if (!selectedPath) {
-      return { selected: false, path: null };
+  // 测试 ASR 连接
+  app.post("/settings/asr/test", async () => {
+    const db = getDb();
+    const settings = db.prepare(
+      "SELECT key, value FROM settings WHERE key IN ('asr_api_key', 'asr_resource_id')"
+    ).all() as Array<{ key: string; value: string }>;
+
+    const configMap: Record<string, string> = {};
+    for (const s of settings) {
+      configMap[s.key] = s.value;
     }
 
-    return {
-      selected: true,
-      path: selectedPath,
-    };
+    const apiKey = configMap.asr_api_key;
+    const resourceId = configMap.asr_resource_id || "volc.seedasr.sauc.duration";
+
+    if (!apiKey) {
+      return { ok: false, error: "ASR API key not configured" };
+    }
+
+    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      let settled = false;
+      const connectId = crypto.randomUUID();
+      const ws = new WebSocket(BIGMODEL_ASR_URL, {
+        headers: {
+          "X-Api-Key": apiKey,
+          "X-Api-Resource-Id": resourceId,
+          "X-Api-Connect-Id": connectId,
+          "X-Api-Sequence": "-1",
+        },
+      });
+
+      ws.on("open", () => {
+        if (settled) return;
+        settled = true;
+        ws.close();
+        resolve({ ok: true });
+      });
+
+      ws.on("error", (err) => {
+        if (settled) return;
+        settled = true;
+        resolve({ ok: false, error: err.message || "WebSocket connection failed" });
+      });
+
+      setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        if (ws.readyState !== WebSocket.CLOSED) {
+          ws.terminate();
+        }
+        resolve({ ok: false, error: "Connection timeout" });
+      }, 10000);
+    });
   });
 
   // 更新 ASR 配置
@@ -190,90 +235,77 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     return { updated: true };
   });
 
-// 获取系统状态
-  app.get("/settings/system", async () => {
-    const db = getDb();
-    const disk = readDiskSpace(config.libraryRoot);
-
-    const stats = {
-      sources: row<{ count: number }>(
-        db.prepare("SELECT COUNT(*) AS count FROM sources")
-      )?.count ?? 0,
-      sessions: row<{ count: number }>(
-        db.prepare("SELECT COUNT(*) AS count FROM sessions")
-      )?.count ?? 0,
-      segments: row<{ count: number }>(
-        db.prepare("SELECT COUNT(*) AS count FROM segments")
-      )?.count ?? 0,
-      candidates: row<{ count: number }>(
-        db.prepare("SELECT COUNT(*) AS count FROM candidates")
-      )?.count ?? 0,
-      exports: row<{ count: number }>(
-        db.prepare("SELECT COUNT(*) AS count FROM exports")
-      )?.count ?? 0,
-      pendingCandidates: row<{ count: number }>(
-        db.prepare("SELECT COUNT(*) AS count FROM candidates WHERE status = 'pending'")
-      )?.count ?? 0,
-      approvedCandidates: row<{ count: number }>(
-        db.prepare("SELECT COUNT(*) AS count FROM candidates WHERE status = 'approved'")
-      )?.count ?? 0,
-      ffmpegPath: config.ffmpegPath,
-      libraryRoot: config.libraryRoot,
-      disk,
+  // B站 QR 登录 - 获取二维码
+  app.post("/settings/bilibili/qrcode", async () => {
+    const response = await fetch(
+      "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
+    );
+    const data = (await response.json()) as {
+      code: number;
+      data?: { url: string; qrcode_key: string };
     };
 
-    return stats;
+    if (data.code !== 0 || !data.data) {
+      throw { statusCode: 502, message: "Failed to generate QR code" };
+    }
+
+    return { url: data.data.url, qrcode_key: data.data.qrcode_key };
+  });
+
+  // B站 QR 登录 - 轮询状态
+  app.get("/settings/bilibili/qrcode/poll", async (request) => {
+    const query = request.query as { qrcode_key?: string };
+    if (!query.qrcode_key) {
+      throw { statusCode: 400, message: "Missing qrcode_key parameter" };
+    }
+
+    const response = await fetch(
+      `https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key=${encodeURIComponent(query.qrcode_key)}`
+    );
+    const data = (await response.json()) as Record<string, unknown>;
+    return data;
+  });
+
+  // B站账号信息
+  app.get("/settings/bilibili/account", async () => {
+    const db = getDb();
+    const setting = db.prepare("SELECT value FROM settings WHERE key = 'bilibili_cookie'").get() as
+      | { value: string }
+      | undefined;
+    const cookie = setting?.value;
+
+    if (!cookie) {
+      return { logged_in: false };
+    }
+
+    try {
+      const response = await fetch("https://api.bilibili.com/x/web-interface/nav", {
+        headers: { Cookie: cookie },
+      });
+      const data = (await response.json()) as {
+        code: number;
+        data?: { uname?: string; face?: string; mid?: number };
+      };
+
+      if (data.code !== 0 || !data.data) {
+        return { logged_in: false };
+      }
+
+      return {
+        logged_in: true,
+        uname: data.data.uname ?? "",
+        face: data.data.face ?? "",
+        uid: data.data.mid ?? 0,
+      };
+    } catch {
+      return { logged_in: false };
+    }
+  });
+
+  // 退出 B站登录
+  app.post("/settings/bilibili/logout", async () => {
+    setSettings({ bilibili_cookie: "" });
+    refreshSettings();
+    return { ok: true };
   });
 };
-
-function readDiskSpace(targetPath: string) {
-  try {
-    const info = fs.statfsSync(targetPath);
-    const totalBytes = Number(info.blocks) * Number(info.bsize);
-    const freeBytes = Number(info.bavail) * Number(info.bsize);
-    const usedBytes = Math.max(0, totalBytes - freeBytes);
-    const usagePercent = totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 1000) / 10 : 0;
-
-    return {
-      totalBytes,
-      freeBytes,
-      usedBytes,
-      usagePercent,
-    };
-  } catch {
-    return {
-      totalBytes: 0,
-      freeBytes: 0,
-      usedBytes: 0,
-      usagePercent: 0,
-    };
-  }
-}
-
-async function browseForFfmpeg(): Promise<string | null> {
-  if (process.platform !== "win32") {
-    throw new Error("Native ffmpeg file picker is only available on Windows");
-  }
-
-  const command = [
-    "Add-Type -AssemblyName System.Windows.Forms",
-    "$dialog = New-Object System.Windows.Forms.OpenFileDialog",
-    "$dialog.Title = '选择 ffmpeg.exe'",
-    "$dialog.Filter = 'FFmpeg executable (ffmpeg.exe)|ffmpeg.exe|Executable (*.exe)|*.exe'",
-    "$dialog.CheckFileExists = $true",
-    "$dialog.Multiselect = $false",
-    "$result = $dialog.ShowDialog()",
-    "if ($result -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.FileName }",
-  ].join("; ");
-
-  const { stdout } = await execFileAsync(
-    "powershell.exe",
-    ["-NoProfile", "-STA", "-Command", command],
-    {
-      windowsHide: false,
-    }
-  );
-
-  const selectedPath = stdout.trim();
-  return selectedPath || null;
-}
