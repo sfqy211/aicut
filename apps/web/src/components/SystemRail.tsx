@@ -1,4 +1,4 @@
-import { Activity, Eye, Moon, Radio, Rows3, Settings2, Sun, WandSparkles } from "lucide-react";
+import { Eye, Moon, Radio, Rows3, Settings2, Sun, WandSparkles } from "lucide-react";
 import { useTheme } from "../contexts/ThemeContext";
 import { useSidebar } from "../contexts/SidebarContext";
 
@@ -17,16 +17,15 @@ const items = [
 
 export function SystemRail({ activePage, onNavigate }: Props) {
   const { theme, toggleTheme } = useTheme();
-  const { collapsed } = useSidebar();
+  const { collapsed, toggle } = useSidebar();
 
   return (
     <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
-      <div className="brand">
-        <div className="brand-icon">
-          <Activity size={14} />
-        </div>
-        {!collapsed && <span className="brand-text">AICUT</span>}
-      </div>
+      <button className="sidebar-toggle" onClick={toggle} title={collapsed ? "展开侧栏" : "收起侧栏"}>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="20" height="20">
+          <path fill="currentColor" d="M896 192H128v128h768zm0 256H384v128h512zm0 256H128v128h768zM320 384 128 512l192 128z" />
+        </svg>
+      </button>
 
       <nav className="nav">
         {items.map((item) => {
