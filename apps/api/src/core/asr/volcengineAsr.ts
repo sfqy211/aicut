@@ -99,36 +99,46 @@ interface ParsedResponse {
 }
 
 function parseResponse(data: Buffer): ParsedResponse {
-  const messageType = (data[1] ?? 0) >> 4;
-  const flags = (data[1] ?? 0) & 0x0f;
-  const compression = (data[2] ?? 0) & 0x0f;
-  const headerBytes = ((data[0] ?? 0) & 0x0f) * 4;
+  try {
+    if (data.length < 4) return {};
 
-  let body = data.subarray(headerBytes);
+    const messageType = (data[1] ?? 0) >> 4;
+    const flags = (data[1] ?? 0) & 0x0f;
+    const compression = (data[2] ?? 0) & 0x0f;
+    const headerBytes = ((data[0] ?? 0) & 0x0f) * 4;
 
-  // 跳过 sequence number（如果存在）
-  const hasSeq = !!(flags & 0x01);
-  if (hasSeq && body.length >= 4) {
-    body = body.subarray(4);
-  }
+    let body = data.subarray(headerBytes);
 
-  if (messageType === SERVER_FULL_RESPONSE && body.length >= 4) {
-    const payloadSize = body.readUInt32BE(0);
-    let payloadBuf = body.subarray(4, 4 + payloadSize);
-    if (compression === COMP_GZIP) {
-      payloadBuf = gunzipSync(payloadBuf);
+    // 跳过 sequence number（如果存在）
+    const hasSeq = !!(flags & 0x01);
+    if (hasSeq && body.length >= 4) {
+      body = body.subarray(4);
     }
-    return JSON.parse(payloadBuf.toString("utf-8")) as ParsedResponse;
-  }
 
-  if (messageType === SERVER_ERROR && body.length >= 8) {
-    const errorCode = body.readUInt32BE(0);
-    const msgSize = body.readUInt32BE(4);
-    const msgBuf = body.subarray(8, 8 + msgSize);
-    return { error: true, code: errorCode, message: msgBuf.toString("utf-8") };
-  }
+    if (messageType === SERVER_FULL_RESPONSE && body.length >= 4) {
+      const payloadSize = body.readUInt32BE(0);
+      if (4 + payloadSize > body.length) {
+        return { error: true, code: -1, message: "Truncated response payload" };
+      }
+      let payloadBuf = body.subarray(4, 4 + payloadSize);
+      if (compression === COMP_GZIP) {
+        payloadBuf = gunzipSync(payloadBuf);
+      }
+      return JSON.parse(payloadBuf.toString("utf-8")) as ParsedResponse;
+    }
 
-  return {};
+    if (messageType === SERVER_ERROR && body.length >= 8) {
+      const errorCode = body.readUInt32BE(0);
+      const msgSize = body.readUInt32BE(4);
+      const safeMsgSize = Math.min(msgSize, body.length - 8);
+      const msgBuf = body.subarray(8, 8 + safeMsgSize);
+      return { error: true, code: errorCode, message: msgBuf.toString("utf-8") };
+    }
+
+    return {};
+  } catch {
+    return { error: true, code: -1, message: "Failed to parse ASR response" };
+  }
 }
 
 // ── 流式 ASR 会话 ──
@@ -188,11 +198,17 @@ export class VolcengineAsrSession {
         try {
           const result = parseResponse(data);
           if (result.error) {
+            // 45000081 = 等包超时，正常结束（音频流结束后的预期行为）
+            if (result.code === 45000081) {
+              this.events.onClose();
+              return;
+            }
             this.events.onError(new Error(`ASR error ${result.code}: ${result.message}`));
             return;
           }
-          // 成功响应：code 20000000（官方文档）或 1000（部分实现）
-          if ((result.code === 20000000 || result.code === 1000) && result.result) {
+          // 成功响应：有 result 且无 error 即为有效结果
+          // bigmodel_async 正常结果帧可能不带 code 字段，不能依赖 code 判断
+          if (result.result && !result.error) {
             const hasFinal = result.result.utterances?.some((u) => u.definite);
             this.events.onResult(result.result, !!hasFinal);
           }

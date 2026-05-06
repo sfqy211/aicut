@@ -25,6 +25,7 @@ export async function startAsrStream(
   sessionId: number,
   audioUrl: string,
   sessionStartTimeMs: number,
+  cookie?: string,
 ): Promise<void> {
   if (activeStreams.has(sessionId)) {
     console.log(`[ASR] Session ${sessionId} already has active ASR stream`);
@@ -82,14 +83,20 @@ export async function startAsrStream(
   );
 
   // 启动 ffmpeg：从音频 URL 拉取，转为 PCM 16kHz 16bit mono
-  const ffmpeg = spawn(config.ffmpegPath, [
+  // 使用 ffmpeg 原生 -referer / -user_agent 标志位，避免 -headers 中 \r\n 在 Windows 上破坏命令行解析
+  const ffmpegArgs = [
+    "-referer", "https://live.bilibili.com/",
+    "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    ...(cookie ? ["-headers", `Cookie: ${cookie}`] : []),
     "-i", audioUrl,
+    "-vn",              // 跳过视频轨（支持 HLS m3u8 输入）
     "-f", "s16le",
     "-ar", "16000",
     "-ac", "1",
     "-acodec", "pcm_s16le",
     "pipe:1",
-  ], {
+  ];
+  const ffmpeg = spawn(config.ffmpegPath, ffmpegArgs, {
     stdio: ["ignore", "pipe", "pipe"],
     env: process.env,
   });
@@ -101,7 +108,12 @@ export async function startAsrStream(
   await asrSession.start();
 
   // 将 ffmpeg 的 PCM 输出实时送入 ASR
+  let lastAudioTime = Date.now();
+  const SILENCE_THRESHOLD_MS = 5000;
+  const SILENCE_CHUNK = Buffer.alloc(6400); // 200ms silence at 16kHz 16bit mono
+
   ffmpeg.stdout!.on("data", (chunk: Buffer) => {
+    lastAudioTime = Date.now();
     // 每次送 200ms 的音频数据（16000Hz × 2bytes × 0.2s = 6400 bytes）
     const CHUNK_SIZE = 6400;
     for (let offset = 0; offset < chunk.length; offset += CHUNK_SIZE) {
@@ -110,6 +122,18 @@ export async function startAsrStream(
     }
   });
 
+  // 静音检测：如果超过 5 秒没有音频数据，发送静音填充防止 ASR 超时断连
+  const silenceTimer = setInterval(() => {
+    if (!asrSession.isOpen || activeStreams.get(sessionId) !== active) {
+      clearInterval(silenceTimer);
+      return;
+    }
+    if (Date.now() - lastAudioTime > SILENCE_THRESHOLD_MS) {
+      asrSession.sendAudio(SILENCE_CHUNK);
+      lastAudioTime = Date.now();
+    }
+  }, 3000);
+
   ffmpeg.on("error", (err) => {
     console.error(`[ASR] ffmpeg spawn error for session ${sessionId}:`, err.message);
     eventBus.publish("session.transcription_failed", { sessionId, error: `ffmpeg: ${err.message}` });
@@ -117,6 +141,7 @@ export async function startAsrStream(
   });
 
   ffmpeg.on("close", (code) => {
+    clearInterval(silenceTimer);
     if (code !== 0 && code !== null) {
       console.warn(`[ASR] ffmpeg exited with code ${code} for session ${sessionId}`);
     }
@@ -129,12 +154,13 @@ export async function startAsrStream(
   let stderrBuf = "";
   ffmpeg.stderr?.on("data", (chunk: Buffer) => {
     stderrBuf += chunk.toString();
-    // 只保留最后 500 字符
-    if (stderrBuf.length > 500) stderrBuf = stderrBuf.slice(-500);
+    // 只保留最后 1000 字符
+    if (stderrBuf.length > 1000) stderrBuf = stderrBuf.slice(-1000);
   });
   ffmpeg.on("close", () => {
-    if (stderrBuf && stderrBuf.includes("Error")) {
-      console.error(`[ASR] ffmpeg stderr (session ${sessionId}):`, stderrBuf.slice(-300));
+    // 始终输出 stderr 便于排查（ffmpeg 正常信息也包含在 stderr）
+    if (stderrBuf) {
+      console.log(`[ASR] ffmpeg stderr (session ${sessionId}):`, stderrBuf.slice(-500));
     }
   });
 }

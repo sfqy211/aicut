@@ -55,5 +55,5 @@ Start-Sleep -Milliseconds 300
 Start-ServiceWindow -Title "AICut-Web" -Command "pnpm dev:web"
 
 Write-Host "`nAll services started in separate windows." -ForegroundColor Green
-Write-Host "  API: http://127.0.0.1:43110"
-Write-Host "  Web: http://127.0.0.1:43111"
+Write-Host "  API:    http://127.0.0.1:43110" -ForegroundColor White
+Write-Host "  Web:    http://127.0.0.1:43111" -ForegroundColor White

@@ -15,11 +15,10 @@ import { addSegment, endSessionPlaylist, getPlaylist } from "./playlist.js";
 import { HlsDownloader, type DownloadError } from "./hlsDownloader.js";
 import { DanmuClient } from "./danmuClient.js";
 import { fetchRoomInfo, fetchLiveStatus, fetchHlsStream } from "./biliApi.js";
-import { buildHlsStream } from "./hlsStream.js";
-import { getAudioStreamUrl } from "../bilibili/streamUrl.js";
+import { buildHlsStream, type HlsStream } from "./hlsStream.js";
+import { importDanmuTxtToDb } from "./danmuClient.js";
 import { startAsrStream, stopAsrStream, isAsrRunning } from "../asr/index.js";
 import { startScheduler, stopScheduler, isSchedulerRunning } from "../analysis/scheduler.js";
-import { importDanmuTxtToDb } from "./danmuClient.js";
 
 // --- 类型定义 ---
 
@@ -74,6 +73,7 @@ interface EngineState {
   // 运行时组件
   downloader: HlsDownloader | null;
   danmuClient: DanmuClient | null;
+  hlsStream: HlsStream | null;
   // 续录状态
   shouldContinue: boolean;
   sessionStartMs: number;
@@ -216,6 +216,7 @@ function createEngine(sourceId: number, roomId: string, cookie: string | null): 
     updatedAt: Date.now(),
     downloader: null,
     danmuClient: null,
+    hlsStream: null,
     shouldContinue: false,
     sessionStartMs: 0,
     totalDuration: 0,
@@ -339,6 +340,9 @@ async function startRecording(
   );
 
   console.log(`[Recorder] HLS stream: ${hlsStream.index()}`);
+
+  // 保存 HLS 流信息供 ASR 使用
+  engine.hlsStream = hlsStream;
 
   // 启动 HLS 下载器
   engine.downloader = new HlsDownloader({
@@ -508,11 +512,16 @@ async function finalizeSession(engine: EngineState, autoRestart: boolean) {
 
 async function startAsrForSession(engine: EngineState, sessionId: number) {
   try {
-    console.log(`[ASR] Getting audio stream URL for room ${engine.roomId}...`);
     const cookieInfo = readCookie(engine.cookie);
-    const audioUrl = await getAudioStreamUrl(engine.roomId, cookieInfo.auth);
-    console.log(`[ASR] Audio URL obtained, starting ASR stream...`);
-    await startAsrStream(sessionId, audioUrl, engine.sessionStartMs);
+    // 复用录制已有的 HLS m3u8 URL，ffmpeg 加 -vn 提取音频轨
+    // 避免单独请求音频流 URL（可能 403 或独立过期）
+    const hlsUrl = engine.hlsStream?.index();
+    if (!hlsUrl) {
+      console.warn(`[ASR] No HLS stream URL available, skipping ASR for session ${sessionId}`);
+      return;
+    }
+    console.log(`[ASR] Using HLS stream URL for ASR: ${hlsUrl.slice(0, 80)}...`);
+    await startAsrStream(sessionId, hlsUrl, engine.sessionStartMs, cookieInfo.auth);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[ASR] Failed to start for session ${sessionId}: ${message}`);

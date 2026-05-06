@@ -277,6 +277,29 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
           .join("; ");
         setSettings({ bilibili_cookie: cookieStr });
         refreshSettings();
+
+        // 立即获取账号信息并返回
+        try {
+          const navRes = await fetch("https://api.bilibili.com/x/web-interface/nav", {
+            headers: { Cookie: cookieStr },
+          });
+          const navData = (await navRes.json()) as {
+            code: number;
+            data?: { uname?: string; face?: string; mid?: number };
+          };
+          if (navData.code === 0 && navData.data) {
+            return {
+              code: 0,
+              data: data.data,
+              account: {
+                logged_in: true,
+                uname: navData.data.uname ?? "",
+                face: navData.data.face ?? "",
+                uid: navData.data.mid ?? 0,
+              },
+            };
+          }
+        } catch { /* ignore */ }
       }
     }
 

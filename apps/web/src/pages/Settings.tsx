@@ -132,18 +132,18 @@ export function Settings() {
 
   async function pollQr(key: string) {
     try {
-      const res = await apiGet<{ code: number; data?: { url?: string } }>(
+      const res = await apiGet<{ code: number; data?: { url?: string }; account?: BilibiliAccount }>(
         `/api/settings/bilibili/qrcode/poll?qrcode_key=${encodeURIComponent(key)}`
       );
       if (res.code === 0) {
         stopPolling();
         setQrStatus("登录成功");
-        // 获取账号信息
-        const acc = await apiGet<BilibiliAccount>("/api/settings/bilibili/account");
-        if (acc.logged_in) {
-          setAccount(acc);
+        setQrUrl(null);
+        setQrKey(null);
+        // 直接使用 poll 响应中的账号信息，避免二次请求时序问题
+        if (res.account?.logged_in) {
+          setAccount(res.account);
         }
-        await refresh();
       } else if (res.code === 86038) {
         stopPolling();
         setQrStatus("二维码已过期，请重新获取");
