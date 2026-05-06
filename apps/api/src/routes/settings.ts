@@ -262,8 +262,25 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     const response = await fetch(
       `https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key=${encodeURIComponent(query.qrcode_key)}`
     );
-    const data = (await response.json()) as Record<string, unknown>;
-    return data;
+    const data = (await response.json()) as {
+      code: number;
+      data?: { url?: string; refresh_token?: string; timestamp?: number };
+    };
+
+    // code: 0=成功, 86101=未扫码, 86090=已扫码未确认, 86038=已过期
+    if (data.code === 0) {
+      // 登录成功，从响应头提取 Cookie 并保存
+      const setCookies = response.headers.getSetCookie();
+      if (setCookies.length > 0) {
+        const cookieStr = setCookies
+          .map((c) => c.split(";")[0])
+          .join("; ");
+        setSettings({ bilibili_cookie: cookieStr });
+        refreshSettings();
+      }
+    }
+
+    return { code: data.code, data: data.data };
   });
 
   // B站账号信息

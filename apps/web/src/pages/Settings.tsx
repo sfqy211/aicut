@@ -132,16 +132,27 @@ export function Settings() {
 
   async function pollQr(key: string) {
     try {
-      const res = await apiGet<{ status: string; message?: string }>(`/api/settings/bilibili/qrcode/poll?qrcode_key=${encodeURIComponent(key)}`);
-      if (res.status === "success") {
+      const res = await apiGet<{ code: number; data?: { url?: string } }>(
+        `/api/settings/bilibili/qrcode/poll?qrcode_key=${encodeURIComponent(key)}`
+      );
+      if (res.code === 0) {
         stopPolling();
         setQrStatus("登录成功");
+        // 获取账号信息
+        const acc = await apiGet<BilibiliAccount>("/api/settings/bilibili/account");
+        if (acc.logged_in) {
+          setAccount(acc);
+        }
         await refresh();
-      } else if (res.status === "expired") {
+      } else if (res.code === 86038) {
         stopPolling();
         setQrStatus("二维码已过期，请重新获取");
+      } else if (res.code === 86090) {
+        setQrStatus("已扫码，请在手机上确认");
+      } else if (res.code === 86101) {
+        setQrStatus("等待扫码...");
       } else {
-        setQrStatus(res.message ?? "等待扫码...");
+        setQrStatus(`状态码: ${res.code}`);
       }
     } catch {
       stopPolling();
