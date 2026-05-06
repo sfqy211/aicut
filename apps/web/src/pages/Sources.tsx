@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { apiDelete, apiGet, apiPost } from "../api/client";
+import { apiDelete, apiGet, apiPatch, apiPost } from "../api/client";
 import { useEventStream } from "../hooks/useEventStream";
 import type { Source } from "../types";
 import { LayoutGrid, List, Play, Square, Trash2, MoreHorizontal, Radio, Clock } from "lucide-react";
@@ -30,6 +30,7 @@ export function Sources() {
   const [sources, setSources] = useState<Source[]>([]);
   const [roomId, setRoomId] = useState("");
   const [streamerName, setStreamerName] = useState("");
+  const [analysisInterval, setAnalysisInterval] = useState(5);
   const [submitting, setSubmitting] = useState(false);
   const [viewMode, setViewMode] = useState<"card" | "list">(() => {
     return (localStorage.getItem("aicut:sources:view") as "card" | "list") || "card";
@@ -55,13 +56,20 @@ export function Sources() {
         roomId,
         streamerName,
         autoRecord: true,
+        analysisInterval,
       });
       setRoomId("");
       setStreamerName("");
+      setAnalysisInterval(5);
       await refresh();
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function patchInterval(id: number, interval: number) {
+    await apiPatch(`/api/sources/${id}`, { analysis_interval: interval });
+    await refresh();
   }
 
   async function toggleMonitoring(source: Source) {
@@ -111,6 +119,17 @@ export function Sources() {
             placeholder="可选"
           />
         </div>
+        <div className="form-group">
+          <label className="form-label">分析间隔（分钟）</label>
+          <input
+            className="form-input"
+            type="number"
+            min={1}
+            value={analysisInterval}
+            onChange={(e) => setAnalysisInterval(Number(e.target.value) || 5)}
+            style={{ width: 80 }}
+          />
+        </div>
         <button className="btn btn-primary" onClick={addSource} disabled={!roomId || submitting}>
           添加直播源
         </button>
@@ -147,6 +166,7 @@ export function Sources() {
               coverUrl={getCoverUrl(source)}
               onToggle={() => toggleMonitoring(source)}
               onDelete={() => deleteSource(source.id)}
+              onPatchInterval={patchInterval}
             />
           ))}
         </div>
@@ -156,6 +176,7 @@ export function Sources() {
             sources={sources}
             onToggle={toggleMonitoring}
             onDelete={deleteSource}
+            onPatchInterval={patchInterval}
           />
         </div>
       )}
@@ -193,11 +214,13 @@ function SourceCard({
   coverUrl,
   onToggle,
   onDelete,
+  onPatchInterval,
 }: {
   source: Source;
   coverUrl?: string;
   onToggle: () => void;
   onDelete: () => void;
+  onPatchInterval: (id: number, interval: number) => void;
 }) {
   const isRecording = source.runtime?.state === "recording";
   const isMonitoring = source.runtime?.monitoring;
@@ -258,6 +281,21 @@ function SourceCard({
             {lastTitle && <span className="last-record-title">{lastTitle}</span>}
           </div>
         )}
+
+        <div className="source-card-interval" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--text-secondary)", marginTop: 4 }}>
+          <span>分析间隔:</span>
+          <input
+            type="number"
+            min={1}
+            value={source.analysis_interval}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              if (v > 0) onPatchInterval(source.id, v);
+            }}
+            style={{ width: 48, fontSize: 12, padding: "2px 4px", borderRadius: 4, border: "1px solid var(--border)", background: "var(--bg-secondary)" }}
+          />
+          <span>分钟</span>
+        </div>
       </div>
     </div>
   );
@@ -267,10 +305,12 @@ function SourceListRow({
   source,
   onToggle,
   onDelete,
+  onPatchInterval,
 }: {
   source: Source;
   onToggle: (source: Source) => void;
   onDelete: (id: number) => void;
+  onPatchInterval: (id: number, interval: number) => void;
 }) {
   const isRecording = source.runtime?.state === "recording";
   const recordingTime = useRecordingTime(source.runtime?.progressTime, isRecording);
@@ -306,6 +346,21 @@ function SourceListRow({
       </td>
       <td className="mono text-muted">{recordingTime || "-"}</td>
       <td>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <input
+            type="number"
+            min={1}
+            value={source.analysis_interval}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              if (v > 0) onPatchInterval(source.id, v);
+            }}
+            style={{ width: 48, fontSize: 12, padding: "2px 4px", borderRadius: 4, border: "1px solid var(--border)", background: "var(--bg-secondary)" }}
+          />
+          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>分钟</span>
+        </div>
+      </td>
+      <td>
         <div className="source-list-actions">
           <button
             className={`btn btn-sm ${source.runtime?.monitoring ? "btn-danger" : "btn-primary"}`}
@@ -326,10 +381,12 @@ function SourceListView({
   sources,
   onToggle,
   onDelete,
+  onPatchInterval,
 }: {
   sources: Source[];
   onToggle: (source: Source) => void;
   onDelete: (id: number) => void;
+  onPatchInterval: (id: number, interval: number) => void;
 }) {
   return (
     <table className="data-table source-list-table">
@@ -340,6 +397,7 @@ function SourceListView({
           <th>平台</th>
           <th>状态</th>
           <th>进度</th>
+          <th>分析间隔</th>
           <th style={{ width: "140px" }}>操作</th>
         </tr>
       </thead>
@@ -350,6 +408,7 @@ function SourceListView({
             source={source}
             onToggle={onToggle}
             onDelete={onDelete}
+            onPatchInterval={onPatchInterval}
           />
         ))}
       </tbody>

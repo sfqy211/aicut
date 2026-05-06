@@ -16,44 +16,6 @@ function formatTime(seconds: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-function ScoreRing({ value }: { value: number }) {
-  const radius = 14;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (Math.min(100, value) / 100) * circumference;
-  return (
-    <div style={{ position: "relative", width: 32, height: 32, flexShrink: 0 }}>
-      <svg width={32} height={32} style={{ transform: "rotate(-90deg)" }}>
-        <circle cx={16} cy={16} r={radius} stroke="#2a2a2c" strokeWidth={3} fill="none" />
-        <circle
-          cx={16}
-          cy={16}
-          r={radius}
-          stroke={value >= 80 ? "#e8b339" : value >= 60 ? "#d4923a" : "#8b6914"}
-          strokeWidth={3}
-          fill="none"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          strokeLinecap="round"
-        />
-      </svg>
-      <span
-        style={{
-          position: "absolute",
-          inset: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 10,
-          fontWeight: 600,
-          color: "#f0f0f0",
-        }}
-      >
-        {Math.round(value)}
-      </span>
-    </div>
-  );
-}
-
 export function CandidatePanel({
   candidates,
   loading,
@@ -167,7 +129,6 @@ export function CandidatePanel({
                     : "#161618";
               }}
             >
-              <ScoreRing value={c.score_total} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div
                   style={{
@@ -179,22 +140,8 @@ export function CandidatePanel({
                     textOverflow: "ellipsis",
                   }}
                 >
-                  {c.ai_title_suggestion || `候选片段 #${c.id}`}
+                  {c.ai_description || `候选片段 #${c.id}`}
                 </div>
-                {c.ai_reason && (
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: "#8a8a8c",
-                      marginTop: 2,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {c.ai_reason}
-                  </div>
-                )}
                 <div
                   style={{
                     display: "flex",

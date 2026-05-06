@@ -16,16 +16,12 @@ function formatTime(seconds: number) {
 export function CandidateCard({ candidate, onApprove, onReject }: Props) {
   return (
     <article className="candidate-card">
-      <div className="candidate-score">
-        <span>{Math.round(candidate.score_total)}</span>
-        <small>score</small>
-      </div>
       <div className="candidate-main">
         <div className="candidate-title">
           <Scissors size={18} />
-          <strong>{candidate.ai_title_suggestion || `候选片段 #${candidate.id}`}</strong>
+          <strong>{`候选片段 #${candidate.id}`}</strong>
         </div>
-        <p>{candidate.ai_summary || "等待 AI 摘要生成"}</p>
+        <p>{candidate.ai_description || "等待 AI 描述生成"}</p>
         <div className="candidate-meta">
           <span>
             <Clock size={14} />

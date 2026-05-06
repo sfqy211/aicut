@@ -5,6 +5,7 @@ export type Source = {
   streamer_name?: string;
   cookie?: string | null;
   auto_record: number;
+  analysis_interval: number;
   created_at: number;
   runtime?: {
     sourceId: number;
@@ -77,52 +78,17 @@ export type SessionDetail = {
 export type Candidate = {
   id: number;
   session_id: number;
-  segment_id?: number | null;
   start_time: number;
   end_time: number;
   duration: number;
-  // 规则评分
-  rule_score: number;
-  score_danmaku: number;
-  score_interaction: number;
-  score_transcript: number;
-  score_energy: number;
-  // 最终评分
-  score_total: number;
-  // LLM 结果
-  llm_score?: number | null;
-  llm_category?: string | null;
-  llm_confidence?: number | null;
-  llm_worth?: number | null;
-  llm_risk?: string | null;
-  // AI 推荐
-  ai_summary?: string | null;
-  ai_title_suggestion?: string | null;
-  ai_reason?: string | null;
-  ai_highlight?: string | null;
-  // 时间调整建议
-  suggested_trim_start: number;
-  suggested_trim_end: number;
-  // 审核状态
+  ai_description: string | null;
   status: "pending" | "approved" | "rejected";
   user_note?: string | null;
-  // 关联信息
-  session_title?: string;
-  session_duration?: number;
   created_at: number;
   updated_at?: number;
 };
 
 export type CandidateDetail = Candidate & {
-  segment_file_path?: string | null;
-  segment_start_offset?: number | null;
-  segment_duration?: number | null;
-  preview_start_time?: number;
-  preview_end_time?: number;
-  preview_duration?: number;
-  preview_padding?: number;
-  relative_clip_start?: number;
-  relative_clip_end?: number;
   preview_url?: string;
 };
 

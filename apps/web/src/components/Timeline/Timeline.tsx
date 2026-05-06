@@ -58,12 +58,6 @@ export function Timeline({
     return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
   };
 
-  const candidateColor = (score: number) => {
-    if (score >= 80) return "rgba(232, 179, 57, 0.65)";
-    if (score >= 60) return "rgba(212, 146, 58, 0.55)";
-    return "rgba(139, 105, 20, 0.45)";
-  };
-
   return (
     <div
       style={{
@@ -125,13 +119,13 @@ export function Timeline({
                 e.stopPropagation();
                 onSelectCandidate(c);
               }}
-              title={`${c.ai_title_suggestion || "候选片段"} (${formatTime(c.start_time)} - ${formatTime(c.end_time)})`}
+              title={`${c.ai_description || "候选片段"} (${formatTime(c.start_time)} - ${formatTime(c.end_time)})`}
               style={{
                 position: "absolute",
                 left: `${timeToPercent(c.start_time)}%`,
                 width: `${timeToPercent(c.end_time) - timeToPercent(c.start_time)}%`,
                 height: "100%",
-                background: candidateColor(c.score_total),
+                background: "rgba(232, 179, 57, 0.55)",
                 border: "none",
                 borderRadius: 2,
                 cursor: "pointer",
