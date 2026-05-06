@@ -151,7 +151,7 @@ export function Settings() {
       const res = await apiGet<{ code: number; data?: { url?: string }; account?: BilibiliAccount }>(
         `/api/settings/bilibili/qrcode/poll?qrcode_key=${encodeURIComponent(key)}`
       );
-      if (res.code === 0) {
+      if (res.code === 0 && res.account) {
         stopPolling();
         setQrStatus("登录成功");
         // 关闭弹窗，刷新账号列表
@@ -159,12 +159,16 @@ export function Settings() {
           setShowQrModal(false);
           void refresh();
         }, 800);
+      } else if (res.code === 0 && !res.account) {
+        stopPolling();
+        setQrStatus("登录失败：未能获取账号信息，请重试");
       } else if (res.code === 86038) {
         stopPolling();
         setQrStatus("二维码已过期，请刷新");
       } else if (res.code === 86090) {
         setQrStatus("已扫码，请在手机上确认");
-      } else if (res.code === 86101) {
+      } else if (res.code === 86101 || res.code === 86039) {
+        // 86101=web版未扫码, 86039=TV版未扫码
         setQrStatus("等待扫码...");
       } else {
         setQrStatus(`状态码: ${res.code}`);

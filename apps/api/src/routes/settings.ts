@@ -7,6 +7,15 @@ import { setSettings, refreshSettings } from "../db/dbSettings.js";
 
 const BIGMODEL_ASR_URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async";
 
+const TV_APPKEY = "4409e2ce8ffd12b8";
+const TV_SECRET = "59b43e04ad6965f34319062b478f83dd";
+
+function generateTvSign(params: Record<string, string>): string {
+  const sorted = Object.keys(params).sort();
+  const query = sorted.map((k) => `${k}=${params[k]}`).join("&");
+  return crypto.createHash("md5").update(query + TV_SECRET).digest("hex");
+}
+
 const asrConfigInput = z.object({
   apiKey: z.string().optional(),
   resourceId: z.string().optional(),
@@ -225,94 +234,130 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     return { updated: true };
   });
 
-  // B站 QR 登录 - 获取二维码
+  // B站 TV 版 QR 登录 - 获取二维码
+  // 使用 TV 版 API，cookies 在响应体中返回，比 web 版更可靠
   app.post("/settings/bilibili/qrcode", async () => {
+    const ts = Math.floor(Date.now() / 1000);
+    const params: Record<string, string> = {
+      appkey: TV_APPKEY,
+      local_id: "0",
+      ts: String(ts),
+    };
+    params.sign = generateTvSign(params);
+
+    const body = new URLSearchParams(params);
     const response = await fetch(
-      "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
+      "https://passport.bilibili.com/x/passport-tv-login/qrcode/auth_code",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      }
     );
     const data = (await response.json()) as {
       code: number;
-      data?: { url: string; qrcode_key: string };
+      data?: { url: string; auth_code: string };
     };
 
     if (data.code !== 0 || !data.data) {
       throw { statusCode: 502, message: "Failed to generate QR code" };
     }
 
-    return { url: data.data.url, qrcode_key: data.data.qrcode_key };
+    return { url: data.data.url, qrcode_key: data.data.auth_code };
   });
 
-  // B站 QR 登录 - 轮询状态
+  // B站 TV 版 QR 登录 - 轮询状态
   app.get("/settings/bilibili/qrcode/poll", async (request) => {
     const query = request.query as { qrcode_key?: string };
     if (!query.qrcode_key) {
       throw { statusCode: 400, message: "Missing qrcode_key parameter" };
     }
 
+    const ts = Math.floor(Date.now() / 1000);
+    const params: Record<string, string> = {
+      appkey: TV_APPKEY,
+      auth_code: query.qrcode_key,
+      local_id: "0",
+      ts: String(ts),
+    };
+    params.sign = generateTvSign(params);
+
+    const body = new URLSearchParams(params);
     const response = await fetch(
-      `https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key=${encodeURIComponent(query.qrcode_key)}`
+      "https://passport.bilibili.com/x/passport-tv-login/qrcode/poll",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      }
     );
     const data = (await response.json()) as {
       code: number;
-      data?: { url?: string; refresh_token?: string; timestamp?: number };
+      data?: {
+        cookie_info?: { cookies?: Array<{ name: string; value: string }> };
+        token_info?: { access_token?: string; mid?: number; refresh_token?: string };
+      };
     };
 
-    // code: 0=成功, 86101=未扫码, 86090=已扫码未确认, 86038=已过期
-    if (data.code === 0) {
-      const setCookies = response.headers.getSetCookie();
-      if (setCookies.length > 0) {
-        const cookieStr = setCookies
-          .map((c) => c.split(";")[0])
+    // code: 0=成功, 86039=未扫码, 86090=已扫码未确认, 86038=已过期
+    if (data.code === 0 && data.data) {
+      const cookieInfo = data.data.cookie_info;
+      const tokenInfo = data.data.token_info;
+
+      if (cookieInfo?.cookies && cookieInfo.cookies.length > 0 && tokenInfo) {
+        const cookieStr = cookieInfo.cookies
+          .map((c) => `${c.name}=${c.value}`)
           .join("; ");
+        const uid = tokenInfo.mid ?? 0;
 
-        // 获取账号信息并写入 bilibili_accounts 表
-        try {
-          const navRes = await fetch("https://api.bilibili.com/x/web-interface/nav", {
-            headers: { Cookie: cookieStr },
-          });
-          const navData = (await navRes.json()) as {
-            code: number;
-            data?: { uname?: string; face?: string; mid?: number };
-          };
-          if (navData.code === 0 && navData.data) {
-            const uid = navData.data.mid ?? 0;
-            const db = getDb();
-
-            // 如果是第一个账号，设为 active
-            const existingCount = row<{ count: number }>(
-              db.prepare("SELECT COUNT(*) as count FROM bilibili_accounts")
-            )?.count ?? 0;
-
-            db.prepare(
-              `INSERT INTO bilibili_accounts (uid, uname, face, cookie, is_active, updated_at)
-               VALUES (@uid, @uname, @face, @cookie, @isActive, unixepoch())
-               ON CONFLICT(uid) DO UPDATE SET
-                 uname = excluded.uname, face = excluded.face,
-                 cookie = excluded.cookie, updated_at = unixepoch()`
-            ).run({
-              uid,
-              uname: navData.data.uname ?? "",
-              face: navData.data.face ?? "",
-              cookie: cookieStr,
-              isActive: existingCount === 0 ? 1 : 0,
+        if (uid > 0) {
+          // 获取账号昵称
+          let uname = "";
+          let face = "";
+          try {
+            const navRes = await fetch("https://api.bilibili.com/x/web-interface/nav", {
+              headers: { Cookie: cookieStr },
             });
-
-            return {
-              code: 0,
-              data: data.data,
-              account: {
-                logged_in: true,
-                uname: navData.data.uname ?? "",
-                face: navData.data.face ?? "",
-                uid,
-              },
+            const navData = (await navRes.json()) as {
+              code: number;
+              data?: { uname?: string; face?: string };
             };
-          }
-        } catch { /* ignore */ }
+            if (navData.code === 0 && navData.data) {
+              uname = navData.data.uname ?? "";
+              face = navData.data.face ?? "";
+            }
+          } catch { /* ignore */ }
+
+          const db = getDb();
+          const existingCount = row<{ count: number }>(
+            db.prepare("SELECT COUNT(*) as count FROM bilibili_accounts")
+          )?.count ?? 0;
+
+          db.prepare(
+            `INSERT INTO bilibili_accounts (uid, uname, face, cookie, is_active, updated_at)
+             VALUES (@uid, @uname, @face, @cookie, @isActive, unixepoch())
+             ON CONFLICT(uid) DO UPDATE SET
+               uname = excluded.uname, face = excluded.face,
+               cookie = excluded.cookie, updated_at = unixepoch()`
+          ).run({
+            uid,
+            uname,
+            face,
+            cookie: cookieStr,
+            isActive: existingCount === 0 ? 1 : 0,
+          });
+
+          return {
+            code: 0,
+            account: { logged_in: true, uname, face, uid },
+          };
+        }
       }
+
+      console.warn("[Settings] TV QR login success but missing cookie_info or token_info");
     }
 
-    return { code: data.code, data: data.data };
+    return { code: data.code };
   });
 
   // B站账号列表
