@@ -14,7 +14,6 @@ import { X, Eye } from "lucide-react";
 import { apiGet, apiPost } from "../api/client";
 import { useDanmaku } from "../hooks/useDanmaku";
 import { useCandidates } from "../hooks/useCandidates";
-import { Timeline } from "../components/Timeline/Timeline";
 import { CandidatePanel } from "../components/CandidatePanel/CandidatePanel";
 import type { DanmakuEvent, LiveTranscriptChunk, SessionDetail, Candidate, ClipSelection } from "../types";
 
@@ -98,7 +97,14 @@ export function LivePreview({ sessionId }: Props) {
           const raw = detail.transcript?.segments_json;
           if (raw) {
             const parsed = JSON.parse(raw) as LiveTranscriptChunk[];
-            if (Array.isArray(parsed)) setSubtitles(parsed);
+            if (Array.isArray(parsed)) {
+              // 将绝对纪元秒转为相对时间（从 session 开始的偏移）
+              const sessionStart = detail.session.start_time ?? 0;
+              const relative = parsed
+                .map((s) => ({ ...s, start: s.start - sessionStart, end: s.end - sessionStart }))
+                .filter((s) => s.start >= 0);
+              setSubtitles(relative);
+            }
           }
         } catch {
           // ignore
@@ -203,14 +209,21 @@ export function LivePreview({ sessionId }: Props) {
         if (data.type === "session.transcription_live" && data.payload?.sessionId === sessionId) {
           const chunk = data.payload?.chunk as LiveTranscriptChunk | undefined;
           if (chunk) {
-            setLiveSubtitle(chunk);
+            // 将绝对纪元秒转为相对时间
+            const sessionStart = sessionDetail?.session.start_time ?? 0;
+            const relativeChunk = {
+              ...chunk,
+              start: chunk.start - sessionStart,
+              end: chunk.end - sessionStart,
+            };
+            setLiveSubtitle(relativeChunk);
             setSubtitles((prev) => {
               const next = [...prev];
-              const existingIndex = next.findIndex((s) => s.start === chunk.start);
+              const existingIndex = next.findIndex((s) => s.start === relativeChunk.start);
               if (existingIndex >= 0) {
-                next[existingIndex] = chunk;
+                next[existingIndex] = relativeChunk;
               } else {
-                next.push(chunk);
+                next.push(relativeChunk);
                 next.sort((a, b) => a.start - b.start);
               }
               if (next.length > 500) return next.slice(next.length - 500);
@@ -227,7 +240,7 @@ export function LivePreview({ sessionId }: Props) {
       events.removeEventListener("session.transcription_live", handler);
       events.close();
     };
-  }, [sessionId]);
+  }, [sessionId, sessionDetail]);
 
   // 字幕列表自动滚动
   useEffect(() => {
@@ -266,6 +279,7 @@ export function LivePreview({ sessionId }: Props) {
   const handleSeekToSubtitle = useCallback((sub: LiveTranscriptChunk) => {
     const video = playerRef.current;
     if (!video) return;
+    // sub.start 已经是相对时间（从 session 开始的偏移秒数）
     video.currentTime = sub.start;
     setIsLiveMode(false);
   }, []);
@@ -308,13 +322,14 @@ export function LivePreview({ sessionId }: Props) {
   }, []);
 
   // 字幕时间：start 是绝对纪元秒
+  // 字幕时间：sub.start 已是相对秒数
   const formatTime = useCallback(
     (seconds: number) => {
-      if (timeMode === "absolute") return formatAbsolute(seconds * 1000);
-      // 相对模式：需要减去 session 开始时间
-      const sessionStart = sessionDetail?.session.start_time;
-      if (sessionStart) return formatRelative(seconds - sessionStart);
-      return formatAbsolute(seconds * 1000);
+      if (timeMode === "absolute") {
+        const sessionStart = sessionDetail?.session.start_time;
+        if (sessionStart) return formatAbsolute((sessionStart + seconds) * 1000);
+      }
+      return formatRelative(seconds);
     },
     [timeMode, formatAbsolute, formatRelative, sessionDetail]
   );
@@ -505,12 +520,6 @@ export function LivePreview({ sessionId }: Props) {
                 isRecording={isRecording}
                 liveSubtitle={liveSubtitle}
                 onBackToLive={handleBackToLive}
-                duration={videoDuration}
-                currentTime={currentTime}
-                candidates={candidates}
-                selection={selection}
-                onSeek={handleSeek}
-                onSelectCandidate={handleSelectCandidate}
                 showShortcuts={showShortcuts}
                 onToggleShortcuts={() => setShowShortcuts((v) => !v)}
               />
@@ -519,7 +528,6 @@ export function LivePreview({ sessionId }: Props) {
               <SubtitlesPanel
                 subtitleListRef={subtitleListRef}
                 subtitles={subtitles}
-                activeSubtitle={activeSubtitle}
                 isLiveMode={isLiveMode}
                 onSeek={handleSeekToSubtitle}
                 formatTime={formatTime}
@@ -645,12 +653,6 @@ function VideoPanel({
   isRecording,
   liveSubtitle,
   onBackToLive,
-  duration,
-  currentTime,
-  candidates,
-  selection,
-  onSeek,
-  onSelectCandidate,
   showShortcuts,
   onToggleShortcuts,
 }: {
@@ -659,12 +661,6 @@ function VideoPanel({
   isRecording: boolean;
   liveSubtitle: LiveTranscriptChunk | null;
   onBackToLive: () => void;
-  duration: number;
-  currentTime: number;
-  candidates: Candidate[];
-  selection: ClipSelection | null;
-  onSeek: (time: number) => void;
-  onSelectCandidate: (candidate: Candidate) => void;
   showShortcuts: boolean;
   onToggleShortcuts: () => void;
 }) {
@@ -702,14 +698,6 @@ function VideoPanel({
           <ShortcutsHelp onClose={onToggleShortcuts} />
         )}
       </div>
-      <Timeline
-        duration={duration}
-        currentTime={currentTime}
-        candidates={candidates}
-        selection={selection}
-        onSeek={onSeek}
-        onSelectCandidate={onSelectCandidate}
-      />
     </div>
   );
 }
@@ -763,14 +751,12 @@ function ShortcutsHelp({ onClose }: { onClose: () => void }) {
 function SubtitlesPanel({
   subtitleListRef,
   subtitles,
-  activeSubtitle,
   isLiveMode,
   onSeek,
   formatTime,
 }: {
   subtitleListRef: React.RefObject<HTMLDivElement | null>;
   subtitles: LiveTranscriptChunk[];
-  activeSubtitle: LiveTranscriptChunk | null;
   isLiveMode: boolean;
   onSeek: (sub: LiveTranscriptChunk) => void;
   formatTime: (s: number) => string;
@@ -786,22 +772,15 @@ function SubtitlesPanel({
           subtitles.map((sub, idx) => (
             <div
               key={`${sub.start}-${idx}`}
-              className={`subtitle-item ${sub === activeSubtitle ? "active" : ""}`}
+              className="subtitle-item"
               onClick={() => onSeek(sub)}
             >
               <span className="subtitle-time">{formatTime(sub.start)}</span>
               <span className="subtitle-text">{sub.text}</span>
-              {sub.isPartial && <span className="tag">Partial</span>}
             </div>
           ))
         )}
       </div>
-      {activeSubtitle && !isLiveMode && (
-        <div className="subtitle-current-bar">
-          <span className="subtitle-time">{formatTime(activeSubtitle.start)}</span>
-          <span className="subtitle-text">{activeSubtitle.text}</span>
-        </div>
-      )}
     </div>
   );
 }
