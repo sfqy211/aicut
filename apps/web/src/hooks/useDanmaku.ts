@@ -59,7 +59,8 @@ export function useDanmaku(sessionId: number | null) {
             event_type: p.type,
             timestamp_ms: p.timestampMs,
             text: p.text,
-            user_id: null,
+            user_id: p.userId ?? null,
+            user_name: p.userName ?? null,
             price: p.price ?? 0,
           };
           setEvents((prev) => {

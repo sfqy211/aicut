@@ -9,6 +9,7 @@ type DanmakuEvent = {
   timestampMs: number;
   text: string;
   userId: string | null;
+  userName: string | null;
   price: number;
 };
 
@@ -35,8 +36,8 @@ export function importDanmakuForSegment(segmentId: number, danmakuPath: string):
   db.prepare("DELETE FROM danmaku_events WHERE segment_id = ?").run(segmentId);
 
   const insert = db.prepare(
-    `INSERT INTO danmaku_events (segment_id, event_type, timestamp_ms, text, user_id, price)
-     VALUES (@segmentId, @eventType, @timestampMs, @text, @userId, @price)`
+    `INSERT INTO danmaku_events (segment_id, event_type, timestamp_ms, text, user_id, user_name, price)
+     VALUES (@segmentId, @eventType, @timestampMs, @text, @userId, @userName, @price)`
   );
   db.exec("BEGIN");
   try {
@@ -47,6 +48,7 @@ export function importDanmakuForSegment(segmentId: number, danmakuPath: string):
         timestampMs: item.timestampMs,
         text: item.text,
         userId: item.userId,
+        userName: item.userName,
         price: item.price
       });
     }
@@ -83,6 +85,7 @@ function parseXmlDanmaku(content: string): DanmakuEvent[] {
       timestampMs: Math.max(0, Math.round(progressSeconds * 1000)),
       text: String(item?.text ?? item ?? ""),
       userId: item?.uid ? String(item.uid) : null,
+      userName: item?.user ? String(item.user) : null,
       price: 0
     });
   }
@@ -93,6 +96,7 @@ function parseXmlDanmaku(content: string): DanmakuEvent[] {
       timestampMs: secondsAttrToMs(item?.ts),
       text: String(item?.text ?? ""),
       userId: item?.uid ? String(item.uid) : null,
+      userName: item?.user ? String(item.user) : null,
       price: xmlPriceToCents(item?.price)
     });
   }
@@ -103,6 +107,7 @@ function parseXmlDanmaku(content: string): DanmakuEvent[] {
       timestampMs: secondsAttrToMs(item?.ts),
       text: String(item?.giftname ?? "gift"),
       userId: item?.uid ? String(item.uid) : null,
+      userName: item?.user ? String(item.user) : null,
       price: xmlPriceToCents(item?.price)
     });
   }
@@ -113,6 +118,7 @@ function parseXmlDanmaku(content: string): DanmakuEvent[] {
       timestampMs: secondsAttrToMs(item?.ts),
       text: String(item?.giftname ?? "guard"),
       userId: item?.uid ? String(item.uid) : null,
+      userName: item?.user ? String(item.user) : null,
       price: xmlPriceToCents(item?.price)
     });
   }
@@ -128,12 +134,14 @@ function parseJsonDanmaku(content: string): DanmakuEvent[] {
   return asArray(messages)
     .map((message): DanmakuEvent | null => {
       const timestampMs = Math.max(0, Number(message.timestamp ?? 0) - metaStart);
+      const senderName = message.sender?.name ?? message.sender?.uname ?? null;
       if (message.type === "comment") {
         return {
           eventType: "danmaku",
           timestampMs,
           text: String(message.text ?? ""),
           userId: message.sender?.uid ? String(message.sender.uid) : null,
+          userName: senderName,
           price: 0
         };
       }
@@ -143,6 +151,7 @@ function parseJsonDanmaku(content: string): DanmakuEvent[] {
           timestampMs,
           text: String(message.text ?? ""),
           userId: message.sender?.uid ? String(message.sender.uid) : null,
+          userName: senderName,
           price: yuanToCents(message.price)
         };
       }
@@ -152,6 +161,7 @@ function parseJsonDanmaku(content: string): DanmakuEvent[] {
           timestampMs,
           text: String(message.name ?? "gift"),
           userId: message.sender?.uid ? String(message.sender.uid) : null,
+          userName: senderName,
           price: yuanToCents(message.price)
         };
       }
@@ -161,6 +171,7 @@ function parseJsonDanmaku(content: string): DanmakuEvent[] {
           timestampMs,
           text: String(message.name ?? "guard"),
           userId: message.sender?.uid ? String(message.sender.uid) : null,
+          userName: senderName,
           price: yuanToCents(message.price)
         };
       }

@@ -98,7 +98,7 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
 
     const since = query.since;
     const sql = `
-      SELECT id, event_type, timestamp_ms, text, user_id, price
+      SELECT id, event_type, timestamp_ms, text, user_id, user_name, price
       FROM danmaku_events
       WHERE session_id = ?
         ${since !== undefined ? "AND timestamp_ms > ?" : ""}

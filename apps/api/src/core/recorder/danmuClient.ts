@@ -51,8 +51,8 @@ export class DanmuClient {
     // 预编译 INSERT 语句（提高高频写入性能）
     const db = getDb();
     this.insertStmt = db.prepare(
-      `INSERT INTO danmaku_events (session_id, event_type, timestamp_ms, text, user_id, price)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO danmaku_events (session_id, event_type, timestamp_ms, text, user_id, user_name, price)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     );
 
     // 构造 cookie（需要包含 buvid3，blive-message-listener 内部会补充）
@@ -173,6 +173,7 @@ export class DanmuClient {
         msg.timestampMs,
         msg.text,
         msg.userId,
+        msg.userName,
         msg.price
       );
     } catch (err) {
@@ -185,6 +186,8 @@ export class DanmuClient {
       type: msg.type,
       text: msg.text,
       timestampMs: msg.timestampMs,
+      userId: msg.userId,
+      userName: msg.userName,
       price: msg.price,
     });
   }
@@ -197,6 +200,7 @@ export interface ParsedDanmuEntry {
   timestampMs: number;
   text: string;
   userId: string | null;
+  userName: string | null;
   price: number;
 }
 
@@ -221,6 +225,7 @@ export function parseDanmuTxt(filePath: string): ParsedDanmuEntry[] {
         timestampMs: msg.timestampMs,
         text: msg.text,
         userId: msg.userId,
+        userName: msg.userName ?? null,
         price: msg.price,
       });
     } catch {
@@ -242,14 +247,14 @@ export function importDanmuTxtToDb(sessionId: number, filePath: string): number 
   db.prepare("DELETE FROM danmaku_events WHERE session_id = ?").run(sessionId);
 
   const insert = db.prepare(
-    `INSERT INTO danmaku_events (session_id, event_type, timestamp_ms, text, user_id, price)
-     VALUES (?, ?, ?, ?, ?, ?)`
+    `INSERT INTO danmaku_events (session_id, event_type, timestamp_ms, text, user_id, user_name, price)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
   );
 
   db.exec("BEGIN");
   try {
     for (const item of events) {
-      insert.run(sessionId, item.type, item.timestampMs, item.text, item.userId, item.price);
+      insert.run(sessionId, item.type, item.timestampMs, item.text, item.userId, item.userName, item.price);
     }
     db.exec("COMMIT");
   } catch (error) {

@@ -141,6 +141,7 @@ export type DanmakuEvent = {
   timestamp_ms: number;
   text: string;
   user_id: string | null;
+  user_name: string | null;
   price: number;
 };
 

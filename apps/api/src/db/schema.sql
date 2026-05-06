@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS danmaku_events (
   timestamp_ms INTEGER NOT NULL,
   text TEXT,
   user_id TEXT,
+  user_name TEXT,
   price INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
