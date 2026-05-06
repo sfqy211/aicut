@@ -5,6 +5,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { config } from "../config.js";
 import { getDb, row } from "../db/index.js";
+import { setSettings, refreshSettings } from "../db/dbSettings.js";
 import {
   getAllKeywords,
   getPromptsConfig,
@@ -24,7 +25,15 @@ const llmConfigInput = z.object({
 
 const runtimeConfigInput = z.object({
   ffmpegPath: z.string().min(1).optional(),
-  recorderSegment: z.string().min(1).optional(),
+});
+
+const asrConfigInput = z.object({
+  apiKey: z.string().optional(),
+  resourceId: z.string().optional(),
+});
+
+const cookieConfigInput = z.object({
+  cookie: z.string().optional(),
 });
 
 export const settingsRoutes: FastifyPluginAsync = async (app) => {
@@ -43,12 +52,14 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
       llm_api_key: { value: null, updatedAt: 0 },
       llm_model: { value: null, updatedAt: 0 },
       ffmpeg_path: { value: config.ffmpegPath, updatedAt: 0 },
-      recorder_segment: { value: config.recorderSegment, updatedAt: 0 },
+      asr_api_key: { value: null, updatedAt: 0 },
+      asr_resource_id: { value: "volc.seedasr.sauc.duration", updatedAt: 0 },
+      bilibili_cookie: { value: null, updatedAt: 0 },
     };
 
     for (const setting of settings) {
-      // 不返回 API Key 的完整值
-      if (setting.key === "llm_api_key") {
+      // 不返回敏感字段的完整值
+      if (setting.key === "llm_api_key" || setting.key === "asr_api_key" || setting.key === "bilibili_cookie") {
         result[setting.key] = {
           value: setting.value ? "******" : null,
           updatedAt: setting.updated_at,
@@ -139,24 +150,11 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
       updatedFields.push("ffmpegPath");
     }
 
-    if (input.recorderSegment !== undefined) {
-      db.prepare(
-        `INSERT INTO settings (key, value, updated_at) VALUES ('recorder_segment', @value, @timestamp)
-         ON CONFLICT(key) DO UPDATE SET value = @value, updated_at = @timestamp`
-      ).run({
-        value: input.recorderSegment,
-        timestamp,
-      });
-      config.recorderSegment = input.recorderSegment;
-      updatedFields.push("recorderSegment");
-    }
-
     return {
       updated: updatedFields.length > 0,
       fields: updatedFields,
       effective: {
         ffmpegPath: config.ffmpegPath,
-        recorderSegment: config.recorderSegment,
       },
     };
   });
@@ -171,6 +169,31 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
       selected: true,
       path: selectedPath,
     };
+  });
+
+  // 更新 ASR 配置
+  app.patch("/settings/asr", async (request) => {
+    const input = asrConfigInput.parse(request.body);
+    const entries: Record<string, string> = {};
+
+    if (input.apiKey !== undefined) entries.asr_api_key = input.apiKey;
+    if (input.resourceId !== undefined) entries.asr_resource_id = input.resourceId;
+
+    if (Object.keys(entries).length === 0) return { updated: false };
+
+    setSettings(entries);
+    refreshSettings();
+    return { updated: true, fields: Object.keys(entries) };
+  });
+
+  // 更新 B站 Cookie
+  app.patch("/settings/cookie", async (request) => {
+    const input = cookieConfigInput.parse(request.body);
+    if (!input.cookie) return { updated: false };
+
+    setSettings({ bilibili_cookie: input.cookie });
+    refreshSettings();
+    return { updated: true };
   });
 
   // 获取关键词配置
@@ -226,7 +249,6 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         db.prepare("SELECT COUNT(*) AS count FROM candidates WHERE status = 'approved'")
       )?.count ?? 0,
       ffmpegPath: config.ffmpegPath,
-      recorderSegment: config.recorderSegment,
       libraryRoot: config.libraryRoot,
       disk,
     };

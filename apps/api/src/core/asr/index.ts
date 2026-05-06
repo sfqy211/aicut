@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { config } from "../../config.js";
+import { getAsrApiKey, getAsrResourceId } from "../../db/dbSettings.js";
 import { eventBus } from "../../events/bus.js";
 import { VolcengineAsrSession, type AsrResult } from "./volcengineAsr.js";
 
@@ -30,10 +31,28 @@ export async function startAsrStream(
     return;
   }
 
+  // 前置检查
+  const apiKey = getAsrApiKey();
+  if (!apiKey) {
+    const msg = "ASR API Key 未配置（设置 → ASR 配置），跳过 ASR";
+    console.error(`[ASR] ${msg}`);
+    eventBus.publish("session.transcription_failed", { sessionId, error: msg });
+    return;
+  }
+
+  if (!audioUrl) {
+    const msg = "音频流地址为空，跳过 ASR";
+    console.error(`[ASR] ${msg}`);
+    eventBus.publish("session.transcription_failed", { sessionId, error: msg });
+    return;
+  }
+
+  console.log(`[ASR] Starting for session ${sessionId}, audio: ${audioUrl.slice(0, 80)}...`);
+
   const asrSession = new VolcengineAsrSession(
     {
-      apiKey: config.volcengineApiKey,
-      resourceId: config.volcengineResourceId,
+      apiKey: getAsrApiKey(),
+      resourceId: getAsrResourceId(),
     },
     {
       onOpen: () => {
@@ -92,8 +111,8 @@ export async function startAsrStream(
   });
 
   ffmpeg.on("error", (err) => {
-    console.error(`[ASR] ffmpeg error for session ${sessionId}:`, err.message);
-    eventBus.publish("session.transcription_failed", { sessionId, error: err.message });
+    console.error(`[ASR] ffmpeg spawn error for session ${sessionId}:`, err.message);
+    eventBus.publish("session.transcription_failed", { sessionId, error: `ffmpeg: ${err.message}` });
     cleanup(sessionId);
   });
 
@@ -101,14 +120,23 @@ export async function startAsrStream(
     if (code !== 0 && code !== null) {
       console.warn(`[ASR] ffmpeg exited with code ${code} for session ${sessionId}`);
     }
-    // ffmpeg 结束时，发送最后一帧给 ASR
     if (asrSession.isOpen) {
       asrSession.close();
     }
   });
 
-  // stderr 用于调试（不输出到控制台，避免噪音）
-  ffmpeg.stderr?.on("data", () => {});
+  // 捕获 ffmpeg stderr 用于排查音频拉取问题
+  let stderrBuf = "";
+  ffmpeg.stderr?.on("data", (chunk: Buffer) => {
+    stderrBuf += chunk.toString();
+    // 只保留最后 500 字符
+    if (stderrBuf.length > 500) stderrBuf = stderrBuf.slice(-500);
+  });
+  ffmpeg.on("close", () => {
+    if (stderrBuf && stderrBuf.includes("Error")) {
+      console.error(`[ASR] ffmpeg stderr (session ${sessionId}):`, stderrBuf.slice(-300));
+    }
+  });
 }
 
 /**

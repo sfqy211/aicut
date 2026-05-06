@@ -23,15 +23,9 @@ export async function buildServer() {
   const persistedFfmpegPath = row<{ value: string }>(
     db.prepare("SELECT value FROM settings WHERE key = 'ffmpeg_path'")
   )?.value;
-  const persistedRecorderSegment = row<{ value: string }>(
-    db.prepare("SELECT value FROM settings WHERE key = 'recorder_segment'")
-  )?.value;
 
   if (persistedFfmpegPath) {
     updateRecorderFfmpegPath(persistedFfmpegPath);
-  }
-  if (persistedRecorderSegment) {
-    config.recorderSegment = persistedRecorderSegment;
   }
 
   const app = Fastify({

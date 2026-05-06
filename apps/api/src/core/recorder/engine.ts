@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config } from "../../config.js";
 import { getDb, row, rows } from "../../db/index.js";
+import { getBilibiliCookie } from "../../db/dbSettings.js";
 import { eventBus } from "../../events/bus.js";
 import {
   libraryPaths,
@@ -502,10 +503,11 @@ async function finalizeSession(engine: EngineState, autoRestart: boolean) {
 
 async function startAsrForSession(engine: EngineState, sessionId: number) {
   try {
+    console.log(`[ASR] Getting audio stream URL for room ${engine.roomId}...`);
     const cookieInfo = readCookie(engine.cookie);
     const audioUrl = await getAudioStreamUrl(engine.roomId, cookieInfo.auth);
+    console.log(`[ASR] Audio URL obtained, starting ASR stream...`);
     await startAsrStream(sessionId, audioUrl, engine.sessionStartMs);
-    console.log(`[ASR] Started for session ${sessionId}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[ASR] Failed to start for session ${sessionId}: ${message}`);
@@ -626,17 +628,19 @@ export function findLatestLocalCover(roomId: string): string | null {
 }
 
 function readCookie(cookie: string | null): { auth?: string; uid?: number } {
+  // 优先级 1：source 级别的 cookie（sources.cookie 列）
   if (cookie?.trim()) {
     const raw = cookie.trim();
     let content = raw;
     if (!raw.includes("=") && fs.existsSync(path.resolve(raw))) {
       content = fs.readFileSync(path.resolve(raw), "utf8");
     } else if (fs.existsSync(raw)) {
-      content = fs.readFileSync(raw, "utf8");
+      content = fs.readFileSync(path.resolve(raw), "utf8");
     }
     return parseCookieContent(content);
   }
 
+  // 优先级 2：config/cookie.json 文件（兼容旧版）
   const configCookiePath = path.join(repoRoot, "config/cookie.json");
   if (fs.existsSync(configCookiePath)) {
     try {
@@ -645,6 +649,12 @@ function readCookie(cookie: string | null): { auth?: string; uid?: number } {
     } catch (error) {
       console.warn(`Failed to read config/cookie.json: ${error}`);
     }
+  }
+
+  // 优先级 3：DB settings 表
+  const dbCookie = getBilibiliCookie();
+  if (dbCookie?.trim()) {
+    return parseCookieContent(dbCookie);
   }
 
   return {};

@@ -18,8 +18,10 @@ export function Settings() {
   const [settings, setSettings] = useState<SettingsMap | null>(null);
   const [system, setSystem] = useState<SystemSettings | null>(null);
   const [llmForm, setLlmForm] = useState({ apiFormat: "openai", baseUrl: "", apiKey: "", model: "" });
-  const [runtimeForm, setRuntimeForm] = useState({ ffmpegPath: "", recorderSegment: "" });
-  const [saving, setSaving] = useState<"llm" | "runtime" | null>(null);
+  const [runtimeForm, setRuntimeForm] = useState({ ffmpegPath: "" });
+  const [asrForm, setAsrForm] = useState({ apiKey: "", resourceId: "" });
+  const [cookieForm, setCookieForm] = useState({ cookie: "" });
+  const [saving, setSaving] = useState<"llm" | "runtime" | "asr" | "cookie" | null>(null);
 
   async function refresh() {
     const [nextSettings, nextSystem] = await Promise.all([
@@ -37,8 +39,12 @@ export function Settings() {
     });
     setRuntimeForm({
       ffmpegPath: nextSettings.ffmpeg_path?.value ?? nextSystem.ffmpegPath,
-      recorderSegment: nextSettings.recorder_segment?.value ?? nextSystem.recorderSegment,
     });
+    setAsrForm({
+      apiKey: "",
+      resourceId: nextSettings.asr_resource_id?.value ?? "volc.seedasr.sauc.duration",
+    });
+    setCookieForm({ cookie: "" });
   }
 
   useEffect(() => {
@@ -65,7 +71,31 @@ export function Settings() {
     try {
       await apiPatch("/api/settings/runtime", {
         ffmpegPath: runtimeForm.ffmpegPath || undefined,
-        recorderSegment: runtimeForm.recorderSegment || undefined,
+      });
+      await refresh();
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  async function saveAsr() {
+    setSaving("asr");
+    try {
+      await apiPatch("/api/settings/asr", {
+        apiKey: asrForm.apiKey || undefined,
+        resourceId: asrForm.resourceId || undefined,
+      });
+      await refresh();
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  async function saveCookie() {
+    setSaving("cookie");
+    try {
+      await apiPatch("/api/settings/cookie", {
+        cookie: cookieForm.cookie || undefined,
       });
       await refresh();
     } finally {
@@ -192,20 +222,77 @@ export function Settings() {
               </button>
             </div>
           </label>
-          <label className="form-group">
-            <span className="form-label">录制分段时长</span>
-            <input
-              className="form-input"
-              value={runtimeForm.recorderSegment}
-              onChange={(event) => setRuntimeForm((current) => ({ ...current, recorderSegment: event.target.value }))}
-              placeholder="30"
-            />
-          </label>
           <div className="settings-actions">
             <button className="btn btn-primary" onClick={saveRuntime} disabled={saving === "runtime"}>
-              {saving === "runtime" ? "保存中..." : "应用运行时配置"}
+              {saving === "runtime" ? "保存中..." : "保存 FFmpeg 路径"}
             </button>
-            <span className="text-muted">FFmpeg 立即生效，录制分段对新启动的录制器生效。</span>
+            <span className="text-muted">FFmpeg 路径立即生效。</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <span className="panel-title">ASR 配置</span>
+          <span className="tag">VOLCENGINE</span>
+        </div>
+        <div className="panel-body settings-stack">
+          <label className="form-group">
+            <span className="form-label">API Key</span>
+            <input
+              className="form-input"
+              value={asrForm.apiKey}
+              onChange={(e) => setAsrForm((f) => ({ ...f, apiKey: e.target.value }))}
+              placeholder={settings?.asr_api_key?.value ? "已配置，留空则保持不变" : "火山引擎控制台获取"}
+              type="password"
+            />
+          </label>
+          <label className="form-group">
+            <span className="form-label">Resource ID</span>
+            <input
+              className="form-input"
+              value={asrForm.resourceId}
+              onChange={(e) => setAsrForm((f) => ({ ...f, resourceId: e.target.value }))}
+              placeholder="volc.seedasr.sauc.duration"
+            />
+          </label>
+          <div className="settings-hint">
+            豆包2.0 小时版：volc.seedasr.sauc.duration | 并发版：volc.seedasr.sauc.concurrent
+          </div>
+          <div className="settings-actions">
+            <button className="btn btn-primary" onClick={saveAsr} disabled={saving === "asr"}>
+              {saving === "asr" ? "保存中..." : "保存 ASR 配置"}
+            </button>
+            {settings?.asr_api_key?.value && <span className="text-muted">API Key 已存在，页面不会回显明文。</span>}
+          </div>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <span className="panel-title">B站 Cookie</span>
+          <span className="tag">BILIBILI</span>
+        </div>
+        <div className="panel-body settings-stack">
+          <label className="form-group">
+            <span className="form-label">Cookie 内容</span>
+            <textarea
+              className="form-input"
+              value={cookieForm.cookie}
+              onChange={(e) => setCookieForm({ cookie: e.target.value })}
+              placeholder={settings?.bilibili_cookie?.value ? "已配置，留空则保持不变" : "粘贴完整 Cookie 字符串或 JSON"}
+              rows={3}
+              style={{ fontFamily: "monospace", fontSize: 12, resize: "vertical" }}
+            />
+          </label>
+          <div className="settings-hint">
+            支持三种格式：原始 Cookie 字符串、JSON 数组、JSON 对象。优先级低于直播源级别配置的 Cookie。
+          </div>
+          <div className="settings-actions">
+            <button className="btn btn-primary" onClick={saveCookie} disabled={saving === "cookie"}>
+              {saving === "cookie" ? "保存中..." : "保存 Cookie"}
+            </button>
+            {settings?.bilibili_cookie?.value && <span className="text-muted">Cookie 已存在，页面不会回显明文。</span>}
           </div>
         </div>
       </section>

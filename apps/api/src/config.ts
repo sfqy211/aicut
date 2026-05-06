@@ -1,8 +1,5 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import dotenv from "dotenv";
-
-dotenv.config();
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -11,12 +8,9 @@ function resolveFromRoot(value: string): string {
 }
 
 export const config = {
-  host: process.env.AICUT_API_HOST ?? "127.0.0.1",
-  port: Number(process.env.AICUT_API_PORT ?? 43110),
-  dbPath: resolveFromRoot(process.env.AICUT_DB_PATH ?? "./library/aicut.db"),
-  libraryRoot: resolveFromRoot(process.env.AICUT_LIBRARY_ROOT ?? "./library"),
-  ffmpegPath: process.env.AICUT_FFMPEG_PATH ?? "ffmpeg",
-  recorderSegment: process.env.AICUT_RECORDER_SEGMENT ?? "30",
-  volcengineApiKey: process.env.AICUT_VOLCENGINE_API_KEY ?? "",
-  volcengineResourceId: process.env.AICUT_VOLCENGINE_RESOURCE_ID ?? "volc.seedasr.sauc.duration",
+  host: "127.0.0.1",
+  port: 43110,
+  dbPath: resolveFromRoot("./library/aicut.db"),
+  libraryRoot: resolveFromRoot("./library"),
+  ffmpegPath: "ffmpeg",
 };

@@ -188,7 +188,6 @@ export type SystemSettings = {
   pendingCandidates: number;
   approvedCandidates: number;
   ffmpegPath: string;
-  recorderSegment: string;
   libraryRoot: string;
   disk: {
     totalBytes: number;
