@@ -497,6 +497,112 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   margin-top: 2px;
 }
 
+/* Session Table */
+.session-table-wrap {
+  flex: 1;
+  overflow: auto;
+}
+
+.session-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.session-table th {
+  text-align: left;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 11px;
+  background: var(--bg-tertiary);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.session-table td {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.session-table-row {
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.session-table-row:hover {
+  background: var(--accent-dim);
+}
+
+.session-table-row.live {
+  background: color-mix(in srgb, var(--danger) 4%, transparent);
+}
+
+.session-table-row.live:hover {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+.session-table-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.session-table-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.session-table-status-dot.recording {
+  background: var(--danger);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.session-table-status-dot.ended {
+  background: var(--text-secondary);
+}
+
+.session-table-title {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 320px;
+}
+
+.session-table-mono {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.session-table-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.session-table-group-header td {
+  padding: 8px 16px;
+  background: var(--bg-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border);
+}
+
 /* Review Layout */
 .review-layout {
   display: flex;

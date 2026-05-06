@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiDelete, apiGet } from "../api/client";
 import { useEventStream } from "../hooks/useEventStream";
 import type { Session, Source } from "../types";
-import { Radio, Video, Trash2 } from "lucide-react";
+import { Radio, Trash2 } from "lucide-react";
 
 function formatBytes(value: number | null | undefined) {
   if (value == null) return "--";
@@ -52,8 +52,13 @@ export function Sessions({ onEnterLivePreview }: SessionsProps) {
     void apiGet<Session[]>(`/api/sources/${selectedSourceId}/sessions`).then(setSessions);
   }, [selectedSourceId, lastEvent]);
 
-  const liveSessions = useMemo(() => sessions.filter((s) => s.status === "recording"), [sessions]);
-  const endedSessions = useMemo(() => sessions.filter((s) => s.status !== "recording"), [sessions]);
+  const sortedSessions = useMemo(() => {
+    const live = sessions.filter((s) => s.status === "recording");
+    const ended = sessions.filter((s) => s.status !== "recording");
+    live.sort((a, b) => (b.start_time ?? b.created_at ?? 0) - (a.start_time ?? a.created_at ?? 0));
+    ended.sort((a, b) => (b.start_time ?? b.created_at ?? 0) - (a.start_time ?? a.created_at ?? 0));
+    return { live, ended };
+  }, [sessions]);
 
   const handleDeleteSession = (sessionId: number) => {
     void apiDelete(`/api/sessions/${sessionId}`).then(() => {
@@ -117,50 +122,37 @@ export function Sessions({ onEnterLivePreview }: SessionsProps) {
         {sessions.length === 0 ? (
           <div className="panel-body text-muted">该主播暂无直播场次</div>
         ) : (
-          <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 24 }}>
-            {/* 直播中 */}
-            {liveSessions.length > 0 && (
-              <section>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                  <Radio size={14} style={{ color: "var(--danger)" }} />
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--danger)" }}>直播中</span>
-                  <span className="tag">{liveSessions.length}</span>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
-                  {liveSessions.map((session) => (
-                    <SessionCard
-                      key={session.id}
-                      session={session}
-                      isLive
-                      onEnter={() => onEnterLivePreview(session.id)}
-                      onDelete={() => handleDeleteSession(session.id)}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* 已结束 */}
-            {endedSessions.length > 0 && (
-              <section>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                  <Video size={14} style={{ color: "var(--text-secondary)" }} />
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)" }}>已结束</span>
-                  <span className="tag">{endedSessions.length}</span>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
-                  {endedSessions.map((session) => (
-                    <SessionCard
-                      key={session.id}
-                      session={session}
-                      isLive={false}
-                      onEnter={() => onEnterLivePreview(session.id)}
-                      onDelete={() => handleDeleteSession(session.id)}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
+          <div className="session-table-wrap">
+            <table className="session-table">
+              <thead>
+                <tr>
+                  <th>状态</th>
+                  <th>标题</th>
+                  <th>开始时间</th>
+                  <th>时长</th>
+                  <th>大小</th>
+                  <th style={{ textAlign: "right" }}>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedSessions.live.map((session) => (
+                  <SessionRow
+                    key={session.id}
+                    session={session}
+                    onEnter={() => onEnterLivePreview(session.id)}
+                    onDelete={() => handleDeleteSession(session.id)}
+                  />
+                ))}
+                {sortedSessions.ended.map((session) => (
+                  <SessionRow
+                    key={session.id}
+                    session={session}
+                    onEnter={() => onEnterLivePreview(session.id)}
+                    onDelete={() => handleDeleteSession(session.id)}
+                  />
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
@@ -168,18 +160,17 @@ export function Sessions({ onEnterLivePreview }: SessionsProps) {
   );
 }
 
-function SessionCard({
+function SessionRow({
   session,
-  isLive,
   onEnter,
   onDelete,
 }: {
   session: Session;
-  isLive: boolean;
   onEnter: () => void;
   onDelete: () => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const isLive = session.status === "recording";
 
   const handleDeleteClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -191,58 +182,58 @@ function SessionCard({
       setTimeout(() => setConfirmDelete(false), 3000);
     }
   };
+
   return (
-    <div
-      className="panel"
-      style={{
-        padding: 14,
-        display: "flex",
-        flexDirection: "column",
-        gap: 10,
-        borderLeft: `3px solid ${isLive ? "var(--danger)" : "var(--border)"}`,
-        cursor: "pointer",
-        transition: "all 0.15s",
-      }}
+    <tr
+      className={`session-table-row ${isLive ? "live" : ""}`}
       onClick={onEnter}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {session.title || `直播 ${session.live_id || `#${session.id}`}`}
-          </div>
-          <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
-            {formatDateTime(session.start_time ?? session.created_at)}
-          </div>
+      <td>
+        <span className="session-table-status">
+          <span className={`session-table-status-dot ${isLive ? "recording" : "ended"}`} />
+          {isLive ? (
+            <span className="tag" style={{ background: "var(--danger)", color: "#fff", fontSize: 10, flexShrink: 0 }}>
+              LIVE
+            </span>
+          ) : (
+            <span className="tag" style={{ fontSize: 10, flexShrink: 0 }}>
+              {session.status}
+            </span>
+          )}
+        </span>
+      </td>
+      <td>
+        <div className="session-table-title">
+          {session.title || `直播 ${session.live_id || `#${session.id}`}`}
         </div>
-        {isLive ? (
-          <span className="tag" style={{ background: "var(--danger)", color: "#fff", fontSize: 10, flexShrink: 0 }}>
-            LIVE
-          </span>
-        ) : (
-          <span className="tag" style={{ fontSize: 10, flexShrink: 0 }}>
-            {session.status}
-          </span>
-        )}
-      </div>
-
-      <div style={{ display: "flex", gap: 16, fontSize: 12, color: "var(--text-secondary)" }}>
-        <span>时长 {formatSeconds(session.total_duration)}</span>
-        <span>大小 {formatBytes(session.total_size)}</span>
-      </div>
-
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <button
-          className={`btn btn-sm ${confirmDelete ? "btn-danger" : "btn-ghost"}`}
-          onClick={handleDeleteClick}
-          title={confirmDelete ? "再次点击确认删除" : "删除场次"}
-        >
-          <Trash2 size={13} />
-          {confirmDelete ? "确认删除" : "删除"}
-        </button>
-        <button className="btn btn-sm btn-primary" onClick={(e) => { e.stopPropagation(); onEnter(); }}>
-          {isLive ? "实时监控" : "查看回放"}
-        </button>
-      </div>
-    </div>
+      </td>
+      <td className="session-table-mono">
+        {formatDateTime(session.start_time ?? session.created_at)}
+      </td>
+      <td className="session-table-mono">
+        {formatSeconds(session.total_duration)}
+      </td>
+      <td className="session-table-mono">
+        {formatBytes(session.total_size)}
+      </td>
+      <td>
+        <div className="session-table-actions">
+          <button
+            className={`btn btn-sm ${confirmDelete ? "btn-danger" : "btn-ghost"}`}
+            onClick={handleDeleteClick}
+            title={confirmDelete ? "再次点击确认删除" : "删除场次"}
+          >
+            <Trash2 size={13} />
+            {confirmDelete ? "确认删除" : "删除"}
+          </button>
+          <button
+            className="btn btn-sm btn-primary"
+            onClick={(e) => { e.stopPropagation(); onEnter(); }}
+          >
+            {isLive ? "实时监控" : "查看回放"}
+          </button>
+        </div>
+      </td>
+    </tr>
   );
 }

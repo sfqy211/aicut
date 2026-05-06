@@ -190,6 +190,17 @@ export async function stopSessionRecording(sessionId: number): Promise<boolean> 
 }
 
 export async function restoreAutoRecorders() {
+  // 清理残留的 recording 状态 session（进程重启时未 finalize 的）
+  const stale = getDb()
+    .prepare(
+      `UPDATE sessions SET status = 'ended', end_time = unixepoch(), updated_at = unixepoch()
+       WHERE status = 'recording'`
+    )
+    .run();
+  if ((stale as any).changes > 0) {
+    console.log(`[Recorder] Marked ${(stale as any).changes} stale recording session(s) as ended`);
+  }
+
   const sources = rows<SourceRow>(
     getDb().prepare("SELECT * FROM sources WHERE auto_record = 1 ORDER BY id ASC")
   );
@@ -576,6 +587,13 @@ function createSession(
 
   const sessionId = Number(result.lastInsertRowid);
   console.log(`[Recorder] Created session ${sessionId} for source ${engine.sourceId}`);
+
+  // 同步更新 sources 表的主播名（首次获取时写入）
+  if (owner) {
+    db.prepare("UPDATE sources SET streamer_name = @name, updated_at = unixepoch() WHERE id = @id AND (streamer_name IS NULL OR streamer_name = '')")
+      .run({ name: owner, id: engine.sourceId });
+  }
+
   return sessionId;
 }
 
