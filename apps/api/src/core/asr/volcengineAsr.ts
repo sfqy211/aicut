@@ -209,7 +209,11 @@ export class VolcengineAsrSession {
           // 成功响应：有 result 且无 error 即为有效结果
           // bigmodel_async 正常结果帧可能不带 code 字段，不能依赖 code 判断
           if (result.result && !result.error) {
-            const hasFinal = result.result.utterances?.some((u) => u.definite);
+            // bigmodel_async 有时返回只有 text 没有 utterances 的结果帧，跳过
+            if (!result.result.utterances || !Array.isArray(result.result.utterances)) {
+              return;
+            }
+            const hasFinal = result.result.utterances.some((u) => u.definite);
             this.events.onResult(result.result, !!hasFinal);
           }
         } catch (err) {

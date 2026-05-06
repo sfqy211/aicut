@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { config } from "../../config.js";
 import { getAsrApiKey, getAsrResourceId } from "../../db/dbSettings.js";
+import { getDb } from "../../db/index.js";
 import { eventBus } from "../../events/bus.js";
 import { VolcengineAsrSession, type AsrResult } from "./volcengineAsr.js";
 
@@ -61,6 +62,7 @@ export async function startAsrStream(
         eventBus.publish("session.transcription_live", { sessionId, status: "started" });
       },
       onResult: (result: AsrResult, isFinal: boolean) => {
+        if (!result.utterances || !Array.isArray(result.utterances)) return;
         for (const utt of result.utterances) {
           // 将火山引擎的时间戳（从流开始的毫秒）映射到 session 时间轴
           const chunk = {
@@ -70,6 +72,11 @@ export async function startAsrStream(
             isPartial: !utt.definite,
           };
           eventBus.publish("session.transcription_live", { sessionId, chunk });
+
+          // 持久化：definite 结果写入 transcripts 表
+          if (utt.definite) {
+            persistTranscriptChunk(sessionId, chunk);
+          }
         }
       },
       onError: (err: Error) => {
@@ -203,4 +210,48 @@ function cleanup(sessionId: number): void {
   }
   active.session.close();
   activeStreams.delete(sessionId);
+}
+
+// ── 字幕持久化 ──
+
+interface TranscriptChunk {
+  start: number;
+  end: number;
+  text: string;
+  isPartial?: boolean;
+}
+
+/**
+ * 将 definite 字幕追加到 transcripts 表。
+ * 每个 session 一行记录，segments_json 为 JSON 数组，每次追加新 chunk。
+ */
+function persistTranscriptChunk(sessionId: number, chunk: TranscriptChunk): void {
+  try {
+    const db = getDb();
+
+    // 查找或创建 session 级 transcript 记录
+    const existing = db.prepare(
+      "SELECT id, segments_json FROM transcripts WHERE session_id = ?"
+    ).get(sessionId) as { id: number; segments_json: string | null } | undefined;
+
+    const newChunk = { start: chunk.start, end: chunk.end, text: chunk.text };
+
+    if (existing) {
+      // 追加到已有记录
+      let segments: TranscriptChunk[] = [];
+      if (existing.segments_json) {
+        try { segments = JSON.parse(existing.segments_json); } catch { /* ignore */ }
+      }
+      segments.push(newChunk);
+      db.prepare("UPDATE transcripts SET segments_json = ? WHERE id = ?")
+        .run(JSON.stringify(segments), existing.id);
+    } else {
+      // 创建新记录（segment_id 为 null，表示 session 级）
+      db.prepare(
+        "INSERT INTO transcripts (session_id, segment_id, segments_json) VALUES (?, NULL, ?)"
+      ).run(sessionId, JSON.stringify([newChunk]));
+    }
+  } catch (err) {
+    console.error(`[ASR] Failed to persist transcript for session ${sessionId}:`, err);
+  }
 }

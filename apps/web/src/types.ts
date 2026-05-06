@@ -71,6 +71,7 @@ export type SessionSegment = {
 
 export type SessionDetail = {
   session: Session;
+  transcript: { full_text: string | null; segments_json: string | null } | null;
   segments: SessionSegment[];
   candidates: Candidate[];
 };

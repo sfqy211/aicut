@@ -68,6 +68,7 @@ export function LivePreview({ sessionId }: Props) {
   const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null);
   const [danmakuFilter, setDanmakuFilter] = useState<string>("all");
   const [userScrolledDanmaku, setUserScrolledDanmaku] = useState(false);
+  const [timeMode, setTimeMode] = useState<"relative" | "absolute">("relative");
   const danmakuAutoScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { events: danmakuEvents, loading: danmakuLoading } = useDanmaku(sessionId);
@@ -93,7 +94,8 @@ export function LivePreview({ sessionId }: Props) {
         if (cancelled) return;
         setSessionDetail(detail);
         try {
-          const raw = detail.segments[0]?.segments_json;
+          // 优先使用 session 级 transcript（流式 ASR 持久化）
+          const raw = detail.transcript?.segments_json;
           if (raw) {
             const parsed = JSON.parse(raw) as LiveTranscriptChunk[];
             if (Array.isArray(parsed)) setSubtitles(parsed);
@@ -272,17 +274,41 @@ export function LivePreview({ sessionId }: Props) {
     }
   }, []);
 
-  const formatTime = useCallback((seconds: number) => {
+  // 相对时间：MM:SS（从 session 开始的偏移）
+  const formatRelative = useCallback((seconds: number) => {
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
     return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }, []);
 
+  // 绝对时间：HH:mm:ss（中国时间）
+  const formatAbsolute = useCallback((epochMs: number) => {
+    const d = new Date(epochMs);
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+  }, []);
+
+  // 字幕时间：start 是绝对纪元秒
+  const formatTime = useCallback(
+    (seconds: number) => {
+      if (timeMode === "absolute") return formatAbsolute(seconds * 1000);
+      // 相对模式：需要减去 session 开始时间
+      const sessionStart = sessionDetail?.session.start_time;
+      if (sessionStart) return formatRelative(seconds - sessionStart);
+      return formatAbsolute(seconds * 1000);
+    },
+    [timeMode, formatAbsolute, formatRelative, sessionDetail]
+  );
+
+  // 弹幕时间：timestamp_ms 是绝对 epoch 毫秒
   const formatMs = useCallback(
     (ms: number) => {
-      return formatTime(Math.floor(ms / 1000));
+      if (timeMode === "absolute") return formatAbsolute(ms);
+      // 相对模式：需要减去 session 开始时间
+      const sessionStart = sessionDetail?.session.start_time;
+      if (sessionStart) return formatRelative((ms / 1000) - sessionStart);
+      return formatAbsolute(ms);
     },
-    [formatTime]
+    [timeMode, formatAbsolute, formatRelative, sessionDetail]
   );
 
   // 时间轴跳转
@@ -489,6 +515,8 @@ export function LivePreview({ sessionId }: Props) {
                 onFilterChange={setDanmakuFilter}
                 onScroll={handleDanmakuScroll}
                 formatMs={formatMs}
+                timeMode={timeMode}
+                onTimeModeChange={setTimeMode}
               />
             )}
             {id === "candidates" && (
@@ -525,6 +553,7 @@ export function LivePreview({ sessionId }: Props) {
       handleDanmakuScroll,
       formatTime,
       formatMs,
+      timeMode,
       handleHidePanel,
       handleSeek,
       handleSelectCandidate,
@@ -774,6 +803,8 @@ function DanmakuPanel({
   onFilterChange,
   onScroll,
   formatMs,
+  timeMode,
+  onTimeModeChange,
 }: {
   danmakuListRef: React.RefObject<HTMLDivElement | null>;
   danmakuEvents: DanmakuEvent[];
@@ -783,6 +814,8 @@ function DanmakuPanel({
   onFilterChange: (f: string) => void;
   onScroll: () => void;
   formatMs: (ms: number) => string;
+  timeMode: "relative" | "absolute";
+  onTimeModeChange: (m: "relative" | "absolute") => void;
 }) {
   return (
     <div className="live-preview-danmaku-panel">
@@ -796,6 +829,13 @@ function DanmakuPanel({
             {f.label}
           </button>
         ))}
+        <button
+          className={`danmaku-filter-btn ${timeMode === "absolute" ? "active" : ""}`}
+          onClick={() => onTimeModeChange(timeMode === "relative" ? "absolute" : "relative")}
+          title={timeMode === "relative" ? "切换为绝对时间" : "切换为相对时间"}
+        >
+          {timeMode === "relative" ? "相对" : "时钟"}
+        </button>
       </div>
       <div className="danmaku-list" ref={danmakuListRef} onScroll={onScroll}>
         {danmakuLoading && danmakuEvents.length === 0 ? (

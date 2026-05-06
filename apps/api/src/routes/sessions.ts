@@ -46,6 +46,7 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
 
     return {
       session,
+      transcript: transcript ? { full_text: transcript.full_text, segments_json: transcript.segments_json } : null,
       segments: rows(
         db.prepare(
           `SELECT segments.*,

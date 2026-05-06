@@ -66,7 +66,8 @@ export class DanmuClient {
         const content = String(msg.body.content ?? "").replace(/(^\s*)|(\s*$)/g, "").replace(/[\r\n]/g, "");
         if (!content) return;
 
-        const ts = this.opts.sessionStartMs + msg.body.timestamp;
+        // msg.body.timestamp 是绝对毫秒级 epoch，直接使用
+        const ts = msg.body.timestamp ?? Date.now();
         const event: DanmuMessage = {
           type: "danmaku",
           timestampMs: ts,
@@ -81,7 +82,8 @@ export class DanmuClient {
 
       onIncomeSuperChat: (msg: any) => {
         const content = String(msg.body.content ?? "").replace(/[\r\n]/g, "");
-        const ts = this.opts.sessionStartMs + (msg.raw?.send_time ?? Date.now());
+        // msg.raw.send_time 是绝对毫秒级 epoch
+        const ts = msg.raw?.send_time ?? Date.now();
         const event: DanmuMessage = {
           type: "super_chat",
           timestampMs: ts,
@@ -95,7 +97,8 @@ export class DanmuClient {
       },
 
       onGuardBuy: (msg: any) => {
-        const ts = this.opts.sessionStartMs + (msg.timestamp ?? Date.now());
+        // msg.timestamp 是客户端 Date.now() 生成的毫秒级 epoch
+        const ts = msg.timestamp ?? Date.now();
         const event: DanmuMessage = {
           type: "guard",
           timestampMs: ts,
@@ -109,7 +112,8 @@ export class DanmuClient {
       },
 
       onGift: (msg: any) => {
-        const ts = this.opts.sessionStartMs + (msg.raw?.data?.timestamp ? msg.raw.data.timestamp * 1000 : Date.now());
+        // msg.raw.data.timestamp 是秒级 epoch，需 * 1000
+        const ts = msg.raw?.data?.timestamp ? msg.raw.data.timestamp * 1000 : Date.now();
         const event: DanmuMessage = {
           type: "gift",
           timestampMs: ts,
