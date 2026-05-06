@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { config } from "../../config.js";
 import { getDb, row, rows } from "../../db/index.js";
 import { getBilibiliCookie } from "../../db/dbSettings.js";
@@ -21,8 +20,6 @@ import { getAudioStreamUrl } from "../bilibili/streamUrl.js";
 import { startAsrStream, stopAsrStream, isAsrRunning } from "../asr/index.js";
 import { startScheduler, stopScheduler, isSchedulerRunning } from "../analysis/scheduler.js";
 import { importDanmuTxtToDb } from "./danmuClient.js";
-
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
 
 // --- 类型定义 ---
 
@@ -648,18 +645,7 @@ function readCookie(cookie: string | null): { auth?: string; uid?: number } {
     return parseCookieContent(content);
   }
 
-  // 优先级 2：config/cookie.json 文件（兼容旧版）
-  const configCookiePath = path.join(repoRoot, "config/cookie.json");
-  if (fs.existsSync(configCookiePath)) {
-    try {
-      const content = fs.readFileSync(configCookiePath, "utf8");
-      return parseCookieContent(content);
-    } catch (error) {
-      console.warn(`Failed to read config/cookie.json: ${error}`);
-    }
-  }
-
-  // 优先级 3：DB settings 表
+  // 优先级 2：DB settings 表（扫码登录保存的 cookie）
   const dbCookie = getBilibiliCookie();
   if (dbCookie?.trim()) {
     return parseCookieContent(dbCookie);

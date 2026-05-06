@@ -17,7 +17,4 @@ data/
 *.db-shm
 *.db-wal
 
-# 用户配置文件（包含敏感信息）
-config/
-
 reference/
