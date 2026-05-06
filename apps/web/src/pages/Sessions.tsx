@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { apiGet } from "../api/client";
+import { apiDelete, apiGet } from "../api/client";
 import { useEventStream } from "../hooks/useEventStream";
 import type { Session, Source } from "../types";
-import { Radio, Video } from "lucide-react";
+import { Radio, Video, Trash2 } from "lucide-react";
 
 function formatBytes(value: number | null | undefined) {
   if (value == null) return "--";
@@ -54,6 +54,12 @@ export function Sessions({ onEnterLivePreview }: SessionsProps) {
 
   const liveSessions = useMemo(() => sessions.filter((s) => s.status === "recording"), [sessions]);
   const endedSessions = useMemo(() => sessions.filter((s) => s.status !== "recording"), [sessions]);
+
+  const handleDeleteSession = (sessionId: number) => {
+    void apiDelete(`/api/sessions/${sessionId}`).then(() => {
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    }).catch(() => {});
+  };
 
   const selectedSource = useMemo(
     () => sources.find((s) => s.id === selectedSourceId) ?? null,
@@ -127,6 +133,7 @@ export function Sessions({ onEnterLivePreview }: SessionsProps) {
                       session={session}
                       isLive
                       onEnter={() => onEnterLivePreview(session.id)}
+                      onDelete={() => handleDeleteSession(session.id)}
                     />
                   ))}
                 </div>
@@ -148,6 +155,7 @@ export function Sessions({ onEnterLivePreview }: SessionsProps) {
                       session={session}
                       isLive={false}
                       onEnter={() => onEnterLivePreview(session.id)}
+                      onDelete={() => handleDeleteSession(session.id)}
                     />
                   ))}
                 </div>
@@ -164,11 +172,25 @@ function SessionCard({
   session,
   isLive,
   onEnter,
+  onDelete,
 }: {
   session: Session;
   isLive: boolean;
   onEnter: () => void;
+  onDelete: () => void;
 }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const handleDeleteClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirmDelete) {
+      onDelete();
+      setConfirmDelete(false);
+    } else {
+      setConfirmDelete(true);
+      setTimeout(() => setConfirmDelete(false), 3000);
+    }
+  };
   return (
     <div
       className="panel"
@@ -208,7 +230,15 @@ function SessionCard({
         <span>大小 {formatBytes(session.total_size)}</span>
       </div>
 
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <button
+          className={`btn btn-sm ${confirmDelete ? "btn-danger" : "btn-ghost"}`}
+          onClick={handleDeleteClick}
+          title={confirmDelete ? "再次点击确认删除" : "删除场次"}
+        >
+          <Trash2 size={13} />
+          {confirmDelete ? "确认删除" : "删除"}
+        </button>
         <button className="btn btn-sm btn-primary" onClick={(e) => { e.stopPropagation(); onEnter(); }}>
           {isLive ? "实时监控" : "查看回放"}
         </button>

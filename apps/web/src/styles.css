@@ -442,6 +442,18 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   color: #fff;
 }
 
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-secondary);
+}
+
+.btn-ghost:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: transparent;
+}
+
 /* Sessions Layout */
 .sessions-layout {
   display: grid;

@@ -1,6 +1,10 @@
 import type { FastifyPluginAsync } from "fastify";
+import fs from "node:fs";
+import path from "node:path";
 import { z } from "zod";
 import { getDb, row, rows } from "../db/index.js";
+import { stopSessionRecording } from "../core/recorder/engine.js";
+import { getSessionDir, getSourceDir, libraryPaths } from "../core/library/index.js";
 
 export const sessionsRoutes: FastifyPluginAsync = async (app) => {
   app.get("/sessions/overview", async () => {
@@ -107,5 +111,51 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
       : rows(stmt, params.id);
 
     return result;
+  });
+
+  app.delete("/sessions/:id", async (request, reply) => {
+    const params = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
+    const db = getDb();
+
+    const session = row<{ id: number; source_id: number; live_id: string | null; room_id?: string }>(
+      db.prepare(
+        `SELECT sessions.id, sessions.source_id, sessions.live_id, sources.room_id
+         FROM sessions LEFT JOIN sources ON sources.id = sessions.source_id
+         WHERE sessions.id = ?`
+      ),
+      params.id
+    );
+    if (!session) return reply.notFound("Session not found");
+
+    // 如果正在录制，先停止
+    await stopSessionRecording(params.id);
+
+    // 删除关联文件（session 目录：library/sources/{room_id}/{live_id}/）
+    if (session.room_id && session.live_id) {
+      const sessionDir = getSessionDir(session.room_id, session.live_id);
+      if (fs.existsSync(sessionDir)) {
+        try {
+          fs.rmSync(sessionDir, { recursive: true, force: true });
+        } catch (err) {
+          console.error(`[Sessions] Failed to delete session dir ${sessionDir}:`, err);
+        }
+      }
+    }
+
+    // 删除关联导出文件
+    const exportRows = rows<{ output_path: string }>(
+      db.prepare("SELECT output_path FROM exports WHERE session_id = ?"),
+      params.id
+    );
+    for (const exp of exportRows) {
+      if (exp.output_path && fs.existsSync(exp.output_path)) {
+        try { fs.unlinkSync(exp.output_path); } catch { /* ignore */ }
+      }
+    }
+
+    // DB 级联删除（schema 有 ON DELETE CASCADE）
+    db.prepare("DELETE FROM sessions WHERE id = ?").run(params.id);
+
+    return { success: true };
   });
 };

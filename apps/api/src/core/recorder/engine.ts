@@ -179,6 +179,16 @@ export async function stopRecorder(sourceId: number): Promise<RuntimeStatus | nu
   return getSourceRuntime(sourceId);
 }
 
+export async function stopSessionRecording(sessionId: number): Promise<boolean> {
+  for (const engine of engines.values()) {
+    if (engine.sessionId === sessionId) {
+      await finalizeSession(engine, false);
+      return true;
+    }
+  }
+  return false;
+}
+
 export async function restoreAutoRecorders() {
   const sources = rows<SourceRow>(
     getDb().prepare("SELECT * FROM sources WHERE auto_record = 1 ORDER BY id ASC")
