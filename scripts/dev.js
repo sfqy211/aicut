@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import path from "node:path";
 
 const processes = [
   {
@@ -11,13 +10,6 @@ const processes = [
     name: "web",
     command: "pnpm",
     args: ["--filter", "@aicut/web", "dev"],
-  },
-  {
-    name: "asr",
-    command: process.env.AICUT_PYTHON || "python",
-    args: ["main.py"],
-    cwd: path.resolve("services/asr-worker"),
-    env: { ...process.env },
   },
 ];
 

@@ -1,6 +1,5 @@
 param(
     [string]$ProjectDir = "",
-    [string]$AsrVenv = "",
     [switch]$SkipCleanup
 )
 
@@ -16,7 +15,7 @@ Write-Host "Project: $ProjectDir`n"
 # 清理残留端口进程
 if (-not $SkipCleanup) {
     Write-Host "Checking for existing processes on ports..." -ForegroundColor Yellow
-    $ports = @(43110, 43111, 43112)
+    $ports = @(43110, 43111)
     foreach ($port in $ports) {
         $conn = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
         if ($conn) {
@@ -26,22 +25,6 @@ if (-not $SkipCleanup) {
         }
     }
     Start-Sleep -Milliseconds 500
-}
-
-# 查找 ASR venv
-if (-not $AsrVenv) {
-    $venvCandidates = @(
-        (Join-Path $ProjectDir "services\asr-worker\.venv\Scripts\python.exe"),
-        (Join-Path $ProjectDir "services\asr-worker\venv\Scripts\python.exe")
-    )
-    $AsrVenv = $venvCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-}
-
-if (-not $AsrVenv) {
-    $AsrVenv = "python"  # fallback to system python
-    Write-Host "ASR: Using system python" -ForegroundColor Yellow
-} else {
-    Write-Host "ASR: Using venv python: $AsrVenv" -ForegroundColor Green
 }
 
 # 启动函数
@@ -71,13 +54,6 @@ Start-Sleep -Milliseconds 300
 # 启动 Web
 Start-ServiceWindow -Title "AICut-Web" -Command "pnpm dev:web"
 
-Start-Sleep -Milliseconds 300
-
-# 启动 ASR
-$asrDir = Join-Path $ProjectDir "services\asr-worker"
-Start-ServiceWindow -Title "AICut-ASR" -Command "Set-Location '$asrDir'; $AsrVenv main.py"
-
 Write-Host "`nAll services started in separate windows." -ForegroundColor Green
 Write-Host "  API: http://127.0.0.1:43110"
 Write-Host "  Web: http://127.0.0.1:43111"
-Write-Host "  ASR: http://127.0.0.1:43112"
