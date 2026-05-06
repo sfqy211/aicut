@@ -17,7 +17,7 @@ import { DanmuClient } from "./danmuClient.js";
 import { fetchRoomInfo, fetchLiveStatus, fetchHlsStream } from "./biliApi.js";
 import { buildHlsStream } from "./hlsStream.js";
 import { getAudioStreamUrl } from "../bilibili/streamUrl.js";
-import { startAsrStream, stopAsrStream } from "../asr/streamClient.js";
+import { startAsrStream, stopAsrStream, isAsrRunning } from "../asr/index.js";
 import { tryGenerateCandidates } from "../analysis/scoring.js";
 import { importDanmuTxtToDb } from "./danmuClient.js";
 
@@ -362,8 +362,8 @@ async function startRecording(
 
   await engine.downloader.start();
 
-  // 启动 ASR（若未运行则启动，续录时复用同一 ASR 流）
-  if (!getAsrRunning(sessionId)) {
+  // 启动在线 ASR（续录时复用同一流）
+  if (!isAsrRunning(sessionId)) {
     void startAsrForSession(engine, sessionId);
   }
 
@@ -459,7 +459,7 @@ async function finalizeSession(engine: EngineState, autoRestart: boolean) {
   engine.danmuClient = null;
 
   // 停止 ASR
-  await stopAsrForSession(sessionId);
+  stopAsrForSession(sessionId);
 
   // 结束 playlist
   endSessionPlaylist(sessionId);
@@ -500,53 +500,28 @@ async function finalizeSession(engine: EngineState, autoRestart: boolean) {
 
 // --- ASR 管理 ---
 
-const asrRunningSessions = new Set<number>();
-
 async function startAsrForSession(engine: EngineState, sessionId: number) {
   try {
     const cookieInfo = readCookie(engine.cookie);
-    const streamUrl = await getAudioStreamUrl(engine.roomId, cookieInfo.auth);
-    await startAsrStream(sessionId, streamUrl, engine.sessionStartMs);
-    asrRunningSessions.add(sessionId);
-    console.log(`[ASR] Stream started for session ${sessionId}`);
-    eventBus.publish("session.transcription_live", { sessionId, status: "started" });
+    const audioUrl = await getAudioStreamUrl(engine.roomId, cookieInfo.auth);
+    await startAsrStream(sessionId, audioUrl, engine.sessionStartMs);
+    console.log(`[ASR] Started for session ${sessionId}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`[ASR] Failed to start stream for session ${sessionId}: ${message}`);
+    console.error(`[ASR] Failed to start for session ${sessionId}: ${message}`);
     eventBus.publish("session.transcription_failed", { sessionId, error: message });
   }
 }
 
-async function stopAsrForSession(sessionId: number) {
-  if (!asrRunningSessions.has(sessionId)) return;
+function stopAsrForSession(sessionId: number) {
+  if (!isAsrRunning(sessionId)) return;
   try {
-    const segments = await stopAsrStream(sessionId);
-    asrRunningSessions.delete(sessionId);
-    console.log(`[ASR] Stream stopped for session ${sessionId}, segments=${segments.length}`);
-
-    const fullText = segments.map((s) => s.text).join(" ");
-    getDb()
-      .prepare(
-        `INSERT INTO transcripts (session_id, language, full_text, segments_json)
-         VALUES (@sessionId, @language, @fullText, @segmentsJson)`
-      )
-      .run({
-        sessionId,
-        language: "auto",
-        fullText,
-        segmentsJson: JSON.stringify(segments),
-      });
-
-    eventBus.publish("session.transcription_completed", { sessionId, segmentCount: segments.length });
+    stopAsrStream(sessionId);
+    console.log(`[ASR] Stopped for session ${sessionId}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`[ASR] Failed to stop stream for session ${sessionId}: ${message}`);
-    eventBus.publish("session.transcription_failed", { sessionId, error: message });
+    console.error(`[ASR] Failed to stop for session ${sessionId}: ${message}`);
   }
-}
-
-function getAsrRunning(sessionId: number): boolean {
-  return asrRunningSessions.has(sessionId);
 }
 
 // --- Session 管理 ---
