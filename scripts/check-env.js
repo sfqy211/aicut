@@ -6,7 +6,6 @@ const root = process.cwd();
 const checks = [
   ["node", ["--version"]],
   ["pnpm", ["--version"]],
-  ["python", ["--version"]],
   [process.env.AICUT_FFMPEG_PATH || "ffmpeg", ["-version"]],
 ];
 
@@ -25,7 +24,7 @@ for (const [bin, args] of checks) {
   }
 }
 
-for (const dir of ["library", "library/sources", "library/transcripts", "library/candidates", "library/exports"]) {
+for (const dir of ["library", "library/sources", "library/exports", "library/previews"]) {
   fs.mkdirSync(path.join(root, dir), { recursive: true });
   console.log(`[ok] ${dir}`);
 }
