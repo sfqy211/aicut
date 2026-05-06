@@ -93,6 +93,15 @@ export function Settings() {
     }));
   }
 
+  function applyMiMoPreset() {
+    setLlmForm((current) => ({
+      ...current,
+      apiFormat: "openai",
+      baseUrl: "https://api.xiaomimimo.com/v1",
+      model: current.model || "mimo-v2.5-pro",
+    }));
+  }
+
   return (
     <div className="settings-layout">
       <section className="panel">
@@ -107,6 +116,9 @@ export function Settings() {
             </button>
             <button className="btn btn-sm" onClick={() => applyMiniMaxPreset("anthropic")}>
               MiniMax Anthropic 兼容
+            </button>
+            <button className="btn btn-sm" onClick={applyMiMoPreset}>
+              MiMo v2.5 Pro
             </button>
           </div>
           <label className="form-group">
@@ -145,11 +157,11 @@ export function Settings() {
               className="form-input"
               value={llmForm.model}
               onChange={(event) => setLlmForm((current) => ({ ...current, model: event.target.value }))}
-              placeholder="MiniMax-M2.7 / gpt-4o-mini / claude-model"
+              placeholder="mimo-v2.5-pro / gpt-4o-mini / MiniMax-M2.7"
             />
           </label>
           <div className="settings-hint">
-            OpenAI 兼容填写 `https://api.minimaxi.com/v1`，Anthropic 兼容填写 `https://api.minimaxi.com/anthropic`。
+            OpenAI 兼容填写 Base URL（如 `https://api.xiaomimimo.com/v1`），Anthropic 兼容填写 `https://api.minimaxi.com/anthropic`。
           </div>
           <div className="settings-actions">
             <button className="btn btn-primary" onClick={saveLlm} disabled={saving === "llm"}>

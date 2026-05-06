@@ -254,99 +254,169 @@ export async function scoreWithLLM(
     metadata?.liveTitle
   );
 
-  try {
-    const taskSettings = promptsConfig.settings.taskConfig.scoring;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(
-      () => controller.abort(),
-      config.timeout ?? promptsConfig.settings.global.timeout
-    );
+  const taskSettings = promptsConfig.settings.taskConfig.scoring;
+  const endpoint = resolveLlmEndpoint(config);
+  const headers = buildLlmHeaders(config);
+  const body = JSON.stringify(buildLlmPayload(config, {
+    system,
+    user,
+    model: config.model,
+    temperature: taskSettings.temperature,
+    maxTokens: taskSettings.maxTokens,
+    responseFormat: taskSettings.responseFormat,
+  }));
 
-    const response = await fetch(
-      resolveLlmEndpoint(config),
-      {
+  // 重试机制：最多 3 次，指数退避
+  const maxRetries = 3;
+  let lastError: string | null = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(
+        () => controller.abort(),
+        config.timeout ?? promptsConfig.settings.global.timeout
+      );
+
+      const response = await fetch(endpoint, {
         method: "POST",
-        headers: buildLlmHeaders(config),
-        body: JSON.stringify(buildLlmPayload(config, {
-          system,
-          user,
-          model: config.model,
-          temperature: taskSettings.temperature,
-          maxTokens: taskSettings.maxTokens,
-        })),
+        headers,
+        body,
         signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      // 可重试的状态码：429(限流)、500/502/503(服务端错误)
+      if (response.status === 429 || response.status >= 500) {
+        lastError = `HTTP ${response.status}`;
+        if (attempt < maxRetries) {
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+          console.warn(`[LLM] Retry ${attempt}/${maxRetries} after ${delay}ms (HTTP ${response.status})`);
+          await new Promise((r) => setTimeout(r, delay));
+          continue;
+        }
+        console.error(`[LLM] All ${maxRetries} retries failed: ${lastError}`);
+        return null;
       }
-    );
 
-    clearTimeout(timeoutId);
+      if (!response.ok) {
+        console.error(`[LLM] API error: HTTP ${response.status}`);
+        return null;
+      }
 
-    if (!response.ok) {
-      console.error(`LLM API error: ${response.status}`);
-      return null;
+      const data = await response.json();
+      const content = extractLlmText(config, data);
+
+      if (!content) {
+        console.error("[LLM] Response missing content");
+        return null;
+      }
+
+      return parseLlmResult(content);
+    } catch (error) {
+      if (error instanceof Error) {
+        // AbortError = 超时，可重试
+        if (error.name === "AbortError") {
+          lastError = "timeout";
+          if (attempt < maxRetries) {
+            const delay = 1000 * attempt;
+            console.warn(`[LLM] Retry ${attempt}/${maxRetries} after timeout`);
+            await new Promise((r) => setTimeout(r, delay));
+            continue;
+          }
+        }
+        lastError = error.message;
+      }
+      if (attempt >= maxRetries) {
+        console.error(`[LLM] All ${maxRetries} retries failed: ${lastError}`);
+        return null;
+      }
     }
-
-    const data = await response.json();
-    const content = extractLlmText(config, data);
-
-    if (!content) {
-      console.error("LLM response missing content");
-      return null;
-    }
-
-    // 解析 JSON
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.error("LLM response missing JSON");
-      return null;
-    }
-
-    const parsed = JSON.parse(jsonMatch[0]);
-
-    return {
-      worth: Boolean(parsed.worth),
-      confidence: Math.max(0, Math.min(1, Number(parsed.confidence ?? 0.5))),
-      category: String(parsed.category ?? "其他"),
-      highlight: String(parsed.highlight ?? "").slice(0, 30),
-      title: String(parsed.title ?? "").slice(0, 50),
-      reason: String(parsed.reason ?? "").slice(0, 100),
-      risk: parsed.risk ? String(parsed.risk) : null,
-      suggestedAdjustment: {
-        trimStart: Number(parsed.suggestedAdjustment?.trimStart ?? 0),
-        trimEnd: Number(parsed.suggestedAdjustment?.trimEnd ?? 0),
-      },
-    };
-  } catch (error) {
-    if (error instanceof Error) {
-      console.error(`LLM scoring error: ${error.message}`);
-    }
-    return null;
   }
+
+  return null;
+}
+
+// 提取并解析 LLM 返回的 JSON
+function parseLlmResult(content: string): LLMResult | null {
+  // 尝试 1：直接解析（如果 content 就是纯 JSON）
+  try {
+    const parsed = JSON.parse(content);
+    if (parsed && typeof parsed === "object" && "worth" in parsed) {
+      return normalizeLlmResult(parsed);
+    }
+  } catch { /* not pure JSON, continue */ }
+
+  // 尝试 2：从 markdown 代码块中提取
+  const codeBlockMatch = content.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+  if (codeBlockMatch) {
+    try {
+      const parsed = JSON.parse(codeBlockMatch[1]!.trim());
+      if (parsed && typeof parsed === "object" && "worth" in parsed) {
+        return normalizeLlmResult(parsed);
+      }
+    } catch { /* invalid JSON in code block */ }
+  }
+
+  // 尝试 3：提取最外层 JSON 对象（处理前后有额外文本的情况）
+  const braceMatch = extractJsonObject(content);
+  if (braceMatch) {
+    try {
+      const parsed = JSON.parse(braceMatch);
+      if (parsed && typeof parsed === "object" && "worth" in parsed) {
+        return normalizeLlmResult(parsed);
+      }
+    } catch { /* invalid JSON */ }
+  }
+
+  console.error("[LLM] Failed to extract JSON from response");
+  return null;
+}
+
+// 从文本中提取最外层 {} 对象（正确处理嵌套括号）
+function extractJsonObject(text: string): string | null {
+  const start = text.indexOf("{");
+  if (start === -1) return null;
+
+  let depth = 0;
+  for (let i = start; i < text.length; i++) {
+    if (text[i] === "{") depth++;
+    else if (text[i] === "}") depth--;
+    if (depth === 0) return text.slice(start, i + 1);
+  }
+  return null;
+}
+
+// 规范化 LLM 返回结果
+function normalizeLlmResult(parsed: Record<string, unknown>): LLMResult {
+  return {
+    worth: Boolean(parsed.worth),
+    confidence: Math.max(0, Math.min(1, Number(parsed.confidence ?? 0.5))),
+    category: String(parsed.category ?? "其他"),
+    highlight: String(parsed.highlight ?? "").slice(0, 30),
+    title: String(parsed.title ?? "").slice(0, 50),
+    reason: String(parsed.reason ?? "").slice(0, 100),
+    risk: parsed.risk ? String(parsed.risk) : null,
+    suggestedAdjustment: {
+      trimStart: Number((parsed.suggestedAdjustment as Record<string, unknown>)?.trimStart ?? 0),
+      trimEnd: Number((parsed.suggestedAdjustment as Record<string, unknown>)?.trimEnd ?? 0),
+    },
+  };
 }
 
 function resolveLlmEndpoint(config: LLMConfig): string {
   if (config.apiFormat === "anthropic") {
-    if (config.baseUrl.endsWith("/messages")) {
-      return config.baseUrl;
-    }
-
-    if (config.baseUrl.endsWith("/v1")) {
-      return `${config.baseUrl}/messages`;
-    }
-
+    if (config.baseUrl.endsWith("/messages")) return config.baseUrl;
+    if (config.baseUrl.endsWith("/v1")) return `${config.baseUrl}/messages`;
     return `${config.baseUrl}/v1/messages`;
   }
 
-  if (config.baseUrl.endsWith("/chat/completions")) {
-    return config.baseUrl;
-  }
-
-  if (config.baseUrl.endsWith("/v1")) {
-    return `${config.baseUrl}/chat/completions`;
-  }
-
-  return config.baseUrl.endsWith("/chat/completions")
-    ? config.baseUrl
-    : `${config.baseUrl}/v1/chat/completions`;
+  // OpenAI 格式
+  if (config.baseUrl.endsWith("/chat/completions")) return config.baseUrl;
+  if (config.baseUrl.endsWith("/v1")) return `${config.baseUrl}/chat/completions`;
+  // 兜底：假设 baseUrl 是域名根，追加 /v1/chat/completions
+  return `${config.baseUrl}/v1/chat/completions`;
 }
 
 function buildLlmHeaders(config: LLMConfig): Record<string, string> {
@@ -372,6 +442,7 @@ function buildLlmPayload(
     model: string;
     temperature: number;
     maxTokens: number;
+    responseFormat?: string;
   }
 ) {
   if (config.apiFormat === "anthropic") {
@@ -379,7 +450,7 @@ function buildLlmPayload(
       model: input.model,
       system: input.system,
       max_tokens: input.maxTokens,
-      temperature: normalizeMiniMaxTemperature(input.temperature),
+      temperature: clampTemperature(input.temperature),
       messages: [
         {
           role: "user",
@@ -394,15 +465,23 @@ function buildLlmPayload(
     };
   }
 
-  return {
+  // OpenAI 标准格式
+  const payload: Record<string, unknown> = {
     model: input.model,
     messages: [
       { role: "system", content: input.system },
       { role: "user", content: input.user },
     ],
-    temperature: normalizeMiniMaxTemperature(input.temperature),
+    temperature: clampTemperature(input.temperature),
     max_tokens: input.maxTokens,
   };
+
+  // 支持 json_object 响应格式（强制 JSON 输出）
+  if (input.responseFormat === "json_object") {
+    payload.response_format = { type: "json_object" };
+  }
+
+  return payload;
 }
 
 function extractLlmText(config: LLMConfig, data: any): string | null {
@@ -418,7 +497,7 @@ function extractLlmText(config: LLMConfig, data: any): string | null {
   return data?.choices?.[0]?.message?.content ?? null;
 }
 
-function normalizeMiniMaxTemperature(value: number): number {
+function clampTemperature(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return 1;
   return Math.min(1, value);
 }
