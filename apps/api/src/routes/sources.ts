@@ -11,7 +11,7 @@ const sourceInput = z.object({
   streamerName: z.string().optional(),
   cookie: z.string().optional(),
   autoRecord: z.boolean().optional(),
-  outputDir: z.string().optional()
+  analysisInterval: z.number().int().min(0).max(60).optional(),
 });
 
 export const sourcesRoutes: FastifyPluginAsync = async (app) => {
@@ -27,15 +27,15 @@ export const sourcesRoutes: FastifyPluginAsync = async (app) => {
     const db = getDb();
     const result = db
       .prepare(
-        `INSERT INTO sources (platform, room_id, streamer_name, cookie, auto_record, output_dir)
-         VALUES ('bilibili', @roomId, @streamerName, @cookie, @autoRecord, @outputDir)`
+        `INSERT INTO sources (platform, room_id, streamer_name, cookie, auto_record, analysis_interval)
+         VALUES ('bilibili', @roomId, @streamerName, @cookie, @autoRecord, @analysisInterval)`
       )
       .run({
         roomId: input.roomId,
         streamerName: input.streamerName ?? null,
         cookie: input.cookie ?? null,
         autoRecord: input.autoRecord === false ? 0 : 1,
-        outputDir: input.outputDir ?? null
+        analysisInterval: input.analysisInterval ?? 5,
       });
 
     const source = row(db.prepare("SELECT * FROM sources WHERE id = ?"), result.lastInsertRowid);
@@ -64,7 +64,7 @@ export const sourcesRoutes: FastifyPluginAsync = async (app) => {
            streamer_name = COALESCE(@streamerName, streamer_name),
            cookie = COALESCE(@cookie, cookie),
            auto_record = COALESCE(@autoRecord, auto_record),
-           output_dir = COALESCE(@outputDir, output_dir),
+           analysis_interval = COALESCE(@analysisInterval, analysis_interval),
            updated_at = unixepoch()
        WHERE id = @id`
     ).run({
@@ -73,7 +73,7 @@ export const sourcesRoutes: FastifyPluginAsync = async (app) => {
       streamerName: input.streamerName ?? null,
       cookie: input.cookie ?? null,
       autoRecord: input.autoRecord === undefined ? null : input.autoRecord ? 1 : 0,
-      outputDir: input.outputDir ?? null
+      analysisInterval: input.analysisInterval ?? null,
     });
 
     eventBus.publish("source.updated", { id: params.id });

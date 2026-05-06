@@ -60,7 +60,7 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
         ),
         params.id
       ).map((s: any) => ({ ...s, transcript_text: transcript?.full_text ?? null, segments_json: transcript?.segments_json ?? null })),
-      candidates: rows(db.prepare("SELECT * FROM candidates WHERE session_id = ? ORDER BY score_total DESC"), params.id)
+      candidates: rows(db.prepare("SELECT * FROM candidates WHERE session_id = ? ORDER BY created_at DESC"), params.id)
     };
   });
 

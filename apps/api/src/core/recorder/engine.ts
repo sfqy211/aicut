@@ -19,7 +19,7 @@ import { fetchRoomInfo, fetchLiveStatus, fetchHlsStream } from "./biliApi.js";
 import { buildHlsStream } from "./hlsStream.js";
 import { getAudioStreamUrl } from "../bilibili/streamUrl.js";
 import { startAsrStream, stopAsrStream, isAsrRunning } from "../asr/index.js";
-import { tryGenerateCandidates } from "../analysis/scoring.js";
+import { startScheduler, stopScheduler, isSchedulerRunning } from "../analysis/scheduler.js";
 import { importDanmuTxtToDb } from "./danmuClient.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
@@ -368,6 +368,16 @@ async function startRecording(
     void startAsrForSession(engine, sessionId);
   }
 
+  // 启动定时分析调度器
+  const sourceRow = row<{ analysis_interval: number }>(
+    getDb().prepare("SELECT analysis_interval FROM sources WHERE id = ?"),
+    engine.sourceId
+  );
+  const interval = sourceRow?.analysis_interval ?? 5;
+  if (interval > 0 && !isSchedulerRunning(engine.sourceId)) {
+    startScheduler(engine.sourceId, sessionId, engine.sessionStartMs, interval);
+  }
+
   eventBus.publish("source.recording_started", {
     sourceId: engine.sourceId,
     sessionId,
@@ -462,6 +472,9 @@ async function finalizeSession(engine: EngineState, autoRestart: boolean) {
   // 停止 ASR
   stopAsrForSession(sessionId);
 
+  // 停止定时分析调度器（内部会执行最终分析）
+  await stopScheduler(engine.sourceId);
+
   // 结束 playlist
   endSessionPlaylist(sessionId);
 
@@ -487,11 +500,6 @@ async function finalizeSession(engine: EngineState, autoRestart: boolean) {
   }
 
   eventBus.publish("source.recording_stopped", { sourceId: engine.sourceId, sessionId });
-
-  // 触发候选生成
-  void tryGenerateCandidates(sessionId).catch((err) => {
-    console.error(`[Analysis] Failed to generate candidates for session ${sessionId}:`, err);
-  });
 
   engine.sessionId = null;
   engine.liveId = null;

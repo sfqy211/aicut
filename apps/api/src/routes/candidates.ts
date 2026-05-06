@@ -25,11 +25,9 @@ type CandidateMediaRow = {
   start_time: number;
   end_time: number;
   duration: number;
+  ai_description: string | null;
   created_at: number;
   updated_at: number;
-  segment_file_path: string | null;
-  segment_start_offset: number | null;
-  segment_duration: number | null;
   session_title?: string | null;
   session_duration?: number | null;
 };
@@ -54,28 +52,28 @@ export const candidatesRoutes: FastifyPluginAsync = async (app) => {
              FROM candidates c
              LEFT JOIN sessions s ON s.id = c.session_id
              WHERE c.session_id = ? AND c.status = ?
-             ORDER BY c.score_total DESC`;
+             ORDER BY c.created_at DESC`;
       params = [query.sessionId, query.status];
     } else if (query.sessionId) {
       sql = `SELECT c.*, s.title AS session_title, s.total_duration AS session_duration
              FROM candidates c
              LEFT JOIN sessions s ON s.id = c.session_id
              WHERE c.session_id = ?
-             ORDER BY c.score_total DESC`;
+             ORDER BY c.created_at DESC`;
       params = [query.sessionId];
     } else if (query.status) {
       sql = `SELECT c.*, s.title AS session_title, s.total_duration AS session_duration
              FROM candidates c
              LEFT JOIN sessions s ON s.id = c.session_id
              WHERE c.status = ?
-             ORDER BY c.score_total DESC
+             ORDER BY c.created_at DESC
              LIMIT ?`;
       params = [query.status, query.limit];
     } else {
       sql = `SELECT c.*, s.title AS session_title, s.total_duration AS session_duration
              FROM candidates c
              LEFT JOIN sessions s ON s.id = c.session_id
-             ORDER BY c.score_total DESC
+             ORDER BY c.created_at DESC
              LIMIT ?`;
       params = [query.limit];
     }
@@ -90,13 +88,9 @@ export const candidatesRoutes: FastifyPluginAsync = async (app) => {
 
     const candidate = row(
       db.prepare(
-        `SELECT c.*, s.title AS session_title, s.total_duration AS session_duration,
-                seg.file_path AS segment_file_path,
-                seg.start_offset AS segment_start_offset,
-                seg.duration AS segment_duration
+        `SELECT c.*, s.title AS session_title, s.total_duration AS session_duration
          FROM candidates c
          LEFT JOIN sessions s ON s.id = c.session_id
-         LEFT JOIN segments seg ON seg.id = c.segment_id
          WHERE c.id = ?`
       ),
       params.id
@@ -113,26 +107,30 @@ export const candidatesRoutes: FastifyPluginAsync = async (app) => {
     const db = getDb();
 
     const candidate = row<CandidateMediaRow>(
-      db.prepare(
-        `SELECT c.id, c.session_id, c.start_time, c.end_time, c.duration, c.created_at, c.updated_at,
-                c.session_id, c.start_time, c.end_time,
-                seg.file_path AS segment_file_path,
-                seg.start_offset AS segment_start_offset,
-                seg.duration AS segment_duration
-         FROM candidates c
-         LEFT JOIN segments seg ON seg.id = c.segment_id
-         WHERE c.id = ?`
-      ),
+      db.prepare("SELECT id, session_id, start_time, end_time, duration, ai_description, created_at, updated_at FROM candidates WHERE id = ?"),
       params.id
     );
 
     if (!candidate) return reply.notFound("Candidate not found");
-    if (!candidate.segment_file_path) return reply.notFound("Candidate media not found");
-    if (!fs.existsSync(candidate.segment_file_path)) {
+
+    // Find the segment that contains the candidate's start time
+    type SegmentRow = { file_path: string; start_offset: number; duration: number };
+    const segment = row<SegmentRow>(
+      db.prepare(
+        `SELECT file_path, start_offset, duration FROM segments
+         WHERE session_id = ? AND start_offset <= ? AND (start_offset + duration) >= ?
+         ORDER BY start_offset ASC
+         LIMIT 1`
+      ),
+      [candidate.session_id, candidate.start_time, candidate.start_time]
+    );
+
+    if (!segment) return reply.notFound("Candidate media not found");
+    if (!fs.existsSync(segment.file_path)) {
       return reply.notFound("Candidate source file missing");
     }
 
-    const previewInfo = computePreviewWindow(candidate, query.padding);
+    const previewInfo = computePreviewWindow(candidate, segment, query.padding);
     const previewDir = path.join(config.libraryRoot, "previews");
     fs.mkdirSync(previewDir, { recursive: true });
 
@@ -147,7 +145,7 @@ export const candidatesRoutes: FastifyPluginAsync = async (app) => {
 
     if (!fs.existsSync(previewPath)) {
       await generatePreview(
-        candidate.segment_file_path,
+        segment.file_path,
         previewPath,
         previewInfo.localPreviewStart,
         previewInfo.previewDuration
@@ -213,47 +211,33 @@ export const candidatesRoutes: FastifyPluginAsync = async (app) => {
 
     return { updated: input.ids.length };
   });
-
-  // 手动触发候选生成
-  app.post("/candidates/generate/:sessionId", async (request, reply) => {
-    const params = z.object({ sessionId: z.coerce.number().int().positive() }).parse(request.params);
-    const db = getDb();
-
-    const session = row(
-      db.prepare("SELECT id FROM sessions WHERE id = ?"),
-      params.sessionId
-    );
-
-    if (!session) return reply.notFound("Session not found");
-
-    // 动态导入避免循环依赖
-    const { generateCandidates } = await import("../core/analysis/scoring.js");
-    const count = await generateCandidates(params.sessionId);
-
-    return { sessionId: params.sessionId, candidatesGenerated: count };
-  });
 };
 
 function enrichCandidatePreview<T extends CandidateMediaRow & Record<string, unknown>>(candidate: T) {
-  const previewInfo = computePreviewWindow(candidate, 12);
+  // Preview times are based on global session timestamps
+  const padding = 12;
+  const previewStart = Math.max(0, candidate.start_time - padding);
+  const previewEnd = candidate.end_time + padding;
+  const previewDuration = Math.max(1, previewEnd - previewStart);
+
   return {
     ...candidate,
-    preview_start_time: previewInfo.previewStart,
-    preview_end_time: previewInfo.previewEnd,
-    preview_duration: previewInfo.previewDuration,
-    preview_padding: 12,
-    relative_clip_start: previewInfo.relativeClipStart,
-    relative_clip_end: previewInfo.relativeClipEnd,
-    preview_url: `/api/candidates/${candidate.id}/preview.mp4?padding=12`
+    preview_start_time: previewStart,
+    preview_end_time: previewEnd,
+    preview_duration: previewDuration,
+    preview_padding: padding,
+    preview_url: `/api/candidates/${candidate.id}/preview.mp4?padding=${padding}`
   };
 }
 
-function computePreviewWindow(candidate: CandidateMediaRow, padding: number) {
-  const segmentStart = candidate.segment_start_offset ?? 0;
+type SegmentInfo = { file_path: string; start_offset: number; duration: number };
+
+function computePreviewWindow(candidate: CandidateMediaRow, segment: SegmentInfo, padding: number) {
+  const segmentStart = segment.start_offset;
   const relativeClipStart = Math.max(0, candidate.start_time - segmentStart);
   const relativeClipEnd = Math.max(relativeClipStart + 1, candidate.end_time - segmentStart);
   const segmentDuration = Math.max(
-    candidate.segment_duration ?? 0,
+    segment.duration,
     relativeClipEnd,
     candidate.duration
   );

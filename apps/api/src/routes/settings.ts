@@ -6,12 +6,6 @@ import { z } from "zod";
 import { config } from "../config.js";
 import { getDb, row } from "../db/index.js";
 import { setSettings, refreshSettings } from "../db/dbSettings.js";
-import {
-  getAllKeywords,
-  getPromptsConfig,
-  reloadKeywordsConfig,
-  reloadPromptsConfig,
-} from "../core/analysis/index.js";
 import { updateRecorderFfmpegPath } from "../core/recorder/recorderManager.js";
 
 const execFileAsync = promisify(execFile);
@@ -196,32 +190,7 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     return { updated: true };
   });
 
-  // 获取关键词配置
-  app.get("/settings/keywords", async () => {
-    return getAllKeywords();
-  });
-
-  // 获取提示词配置
-  app.get("/settings/prompts", async () => {
-    const config = getPromptsConfig();
-    // 不返回敏感信息
-    return {
-      version: config.version,
-      description: config.description,
-      categories: config.categories,
-      riskKeywords: config.riskKeywords,
-      settings: config.settings,
-    };
-  });
-
-  // 重新加载配置（开发用）
-  app.post("/settings/reload", async () => {
-    reloadKeywordsConfig();
-    reloadPromptsConfig();
-    return { reloaded: true };
-  });
-
-  // 获取系统状态
+// 获取系统状态
   app.get("/settings/system", async () => {
     const db = getDb();
     const disk = readDiskSpace(config.libraryRoot);
