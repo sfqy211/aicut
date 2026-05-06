@@ -193,6 +193,7 @@ export class HlsDownloader {
     }
 
     const buffer = Buffer.from(await res.arrayBuffer());
+    ensureSessionDir(this.opts.roomId, this.opts.liveId);
     fs.writeFileSync(filePath, buffer);
 
     // ffprobe 探测时长和分辨率

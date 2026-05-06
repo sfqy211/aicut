@@ -148,9 +148,22 @@ export class DanmuClient {
   }
 
   private handleMessage(msg: DanmuMessage): void {
-    // 1. 追加到 danmu.txt
+    // 1. 追加到 danmu.txt（备份，DB 是主存储）
     const line = `${msg.timestampMs}:${JSON.stringify(msg)}\n`;
-    fs.appendFileSync(this.danmuPath, line);
+    try {
+      fs.appendFileSync(this.danmuPath, line);
+    } catch (err: any) {
+      if (err?.code === "ENOENT") {
+        try {
+          ensureSessionDir(this.opts.roomId, this.opts.liveId);
+          fs.appendFileSync(this.danmuPath, line);
+        } catch (retryErr) {
+          console.error(`[DanmuClient] Failed to write danmu.txt after ensureSessionDir:`, retryErr);
+        }
+      } else {
+        console.error(`[DanmuClient] Failed to write danmu.txt:`, err);
+      }
+    }
 
     // 2. 实时入库
     try {
