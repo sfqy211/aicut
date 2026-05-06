@@ -22,7 +22,7 @@ AICut — B 站直播切片本地工具。双服务 monorepo：API (Fastify+SQLi
 ```
 apps/api/              @aicut/api   Fastify + node:sqlite, Node 22+
 apps/web/              @aicut/web   React 19 + Vite + TailwindCSS
-config/                gitignored — cookie.json, keywords.json, prompts.json
+bin/                   ffmpeg.exe + ffprobe.exe
 library/               gitignored — runtime data (db, sources, transcripts, exports)
 ```
 
@@ -36,21 +36,24 @@ library/               gitignored — runtime data (db, sources, transcripts, ex
 - **No DB migrations** — `schema.sql` runs on every startup via `CREATE TABLE IF NOT EXISTS`; schema changes require deleting the `.db` file
 - **API imports use `.js` extensions** — `module: "NodeNext"` / `moduleResolution: "NodeNext"` in tsconfig; write `import { x } from "./foo.js"` even for `.ts` source files
 - **No test suite** — there are no tests; `lint` = `typecheck`
-- **`config/` is gitignored** — contains `cookie.json` (B站 login), `keywords.json`, `prompts.json`; first-time setup needs `config/cookie.json` (see `cookie.example.json`)
+- **All config in SQLite** — API keys, cookies, settings all stored in `settings` table; managed via Settings UI
 - **`library/` is gitignored** — runtime output dir; `check:env` creates the subdirectory structure
+- **ffmpeg bundled** — `bin/ffmpeg.exe` and `bin/ffprobe.exe` shipped with repo; `config.ts` resolves path relative to repo root
 - **HLS routes live in `core/hls/`** — not in `routes/`; registered directly in `index.ts`
 - **EventBus** (`events/bus.ts`) is the sole real-time channel; frontend consumes via SSE at `/api/events/stream`
 - **Transcript timestamps are global seconds** from session start, drift-calibrated — map directly to player `currentTime`
-- **ASR 使用火山引擎（豆包）在线服务** — `src/core/asr/volcengineAsr.ts` 实现 WebSocket 二进制协议；`src/core/asr/index.ts` 管理 ffmpeg 音频转码 + ASR 会话生命周期；需要 `AICUT_VOLCENGINE_APP_KEY` 和 `AICUT_VOLCENGINE_ACCESS_KEY` 环境变量
+- **ASR 使用火山引擎（豆包）在线服务** — `src/core/asr/volcengineAsr.ts` 实现 WebSocket 二进制协议；`src/core/asr/index.ts` 管理 ffmpeg 音频转码 + ASR 会话生命周期；API Key 存于 DB `settings.asr_api_key`
+- **AI 分析使用定时调度** — `src/core/analysis/scheduler.ts` 按 `sources.analysis_interval` 分钟间隔触发；`analyze.ts` 收集窗口内字幕+弹幕 → LLM 描述 → 生成候选；`llm.ts` 仅做内容描述，不做价值判断
 
 ## API Internals
 
 - `db/index.ts`: `getDb()`, `row()`, `rows()` — thin wrappers over `DatabaseSync`
-- `config.ts`: all env vars with defaults; paths resolved relative to repo root
+- `db/dbSettings.ts`: unified settings read/write with in-memory cache
+- `config.ts`: minimal bootstrap config (host, port, db path, ffmpeg path)
 - `src/core/recorder/`: HLS direct recording engine (`engine.ts` + `hlsDownloader.ts` + `playlist.ts`). Uses `@bililive-tools/bilibili-recorder` only for stream URL resolution (`biliApi.ts`) and danmaku listening (`danmuClient.ts`); actual recording is custom HLS segment download via ffmpeg. `recorderManager.ts` is a thin re-export from `engine.ts`.
 - `src/core/hls/`: serves recorded `.ts` segments as dynamic m3u8 playlists — zero transmux
 - `src/core/asr/`: 火山引擎在线 ASR。`volcengineAsr.ts` 是 WebSocket 二进制协议客户端；`index.ts` 管理 ffmpeg 音频转码（HLS→PCM 16kHz）→ WebSocket 发送 → EventBus 结果推送
-- `src/core/analysis/`: scoring pipeline — stats → rules → optional LLM → candidates
+- `src/core/analysis/`: 定时 AI 分析。`scheduler.ts` 管理每源定时器；`analyze.ts` 收集窗口数据并调用 LLM；`llm.ts` 封装 LLM HTTP 调用（OpenAI 格式，支持 MiMo）
 - `src/core/export/`: ffmpeg-based rough cut export with SRT generation
 - `src/routes/`: sources, sessions, candidates, exports, settings, events — Zod validation
 - Route registration in `src/index.ts`; `onReady` hook restores auto-record sources

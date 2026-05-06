@@ -2,30 +2,25 @@
 
 AICut 是一个面向个人切片师的本机 Web 工具，目标是把 B 站直播录制后的处理流程压缩为：
 
-`录制 -> 自动转写/分析 -> 人工勾选 -> 导出粗剪`
+`录制 -> 自动转写/AI分析 -> 人工勾选 -> 导出粗剪`
 
 ## 项目结构
 
 ```
 apps/api          # Fastify + SQLite 本地后端
 apps/web          # React + Vite 控制台
+bin/              # ffmpeg + ffprobe
 ```
 
-## 配置文件
+## 配置
 
-配置文件位于 `config/` 目录（已加入 gitignore）：
+所有配置通过 Settings 页面管理，存入 SQLite `settings` 表：
 
-| 文件 | 说明 |
-|------|------|
-| `keywords.json` | 评分关键词配置（正向/负向关键词、分值、分类、别名） |
-| `prompts.json` | LLM 提示词配置（系统提示词、用户模板、任务级参数） |
-| `cookie.json` | B站 Cookie 配置（录制登录态） |
-
-首次使用需创建 `config/cookie.json`，可参考 `config/cookie.example.json`。
+- **LLM 配置**：API URL、API Key、模型名（默认 MiMo v2.5 Pro）
+- **ASR 配置**：火山引擎 API Key、Resource ID
+- **B站账号**：扫码登录，自动保存 Cookie
 
 ## 开发启动
-
-### 合并启动
 
 ```powershell
 pnpm install

@@ -1,30 +1,30 @@
-# Design Context
+# 设计语境
 
-## Users
+## 用户画像
 
-The primary user is a personal Bilibili clip editor working on a local Windows machine. They need to monitor live recording, review AI-generated clip candidates, make fast keep/reject decisions, and export rough cuts for external finishing in Jianying, Premiere, or similar tools.
+主要用户是个人 B 站切片师，在本地 Windows 机器上工作。需要监控录制状态、审核 AI 生成的候选片段、快速做出保留/丢弃决策，并导出粗剪成品到剪映、PR 等工具精修。
 
-## Brand Personality
+## 品牌气质
 
-Professional, focused, and operational. The UI should feel like a compact production control room: confident, legible, and optimized for repeated long sessions rather than casual browsing.
+专业、专注、操作感强。UI 应像一个紧凑的导播控制台：清晰、易读、适合长时间反复操作，而非休闲浏览。
 
-## Aesthetic Direction
+## 美学方向
 
-Use a high-density console aesthetic with strong hierarchy, warm signal colors, and clear state indicators. Prefer an editorial production-desk look over generic SaaS cards. Avoid purple/blue AI gradients, glassmorphism, mascot-style visuals, and overly playful decoration.
+采用高密度控制台美学，层次分明，信号色温暖，状态指示明确。偏好编辑台式的制作感，拒绝通用 SaaS 卡片风格。避免紫蓝 AI 渐变、毛玻璃拟态、吉祥物式视觉元素和过度活泼的装饰。
 
-## Design Principles
+## 设计原则
 
-### Review Throughput
-Prioritize review throughput: candidate quality, reasons, timestamps, and actions should be visible without deep navigation.
+### 审核吞吐优先
+优先保障审核效率：候选质量、生成原因、时间戳和操作按钮应无需深入导航即可看到。
 
-### Explicit System State
-Make system state explicit: recording, transcribing, analyzing, exporting, and errors should have distinct visual language.
+### 系统状态显式化
+系统状态应一目了然：录制中、转写中、分析中、导出中、出错——各自有独立的视觉语言。
 
-### Contextual Controls
-Keep controls close to media context: player, transcript, danmaku signals, and approval controls should stay visually connected.
+### 控件贴近内容
+控件应靠近媒体上下文：播放器、字幕、弹幕信号和审批操作应保持视觉关联。
 
-### Restrained Visual Language
-Use restrained motion and color: highlight state changes and priority only where they affect decisions.
+### 克制的视觉语言
+动效和色彩保持克制：仅在影响决策的地方突出状态变化和优先级。
 
-### Long Session Comfort
-Design for long work sessions: readable type, strong contrast, stable layout, and low visual fatigue.
+### 长会话舒适度
+为长时间工作设计：可读的字号、强对比度、稳定的布局、低视觉疲劳。
