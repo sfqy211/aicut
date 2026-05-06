@@ -20,7 +20,7 @@ export async function buildServer() {
 
   const app = Fastify({
     logger: {
-      level: process.env.LOG_LEVEL ?? "info"
+      level: process.env.LOG_LEVEL ?? "warn"
     }
   });
 
