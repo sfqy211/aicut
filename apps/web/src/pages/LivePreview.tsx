@@ -123,11 +123,31 @@ export function LivePreview({ sessionId }: Props) {
     const init = async () => {
       const Hls = (await import("hls.js")).default;
       if (Hls.isSupported()) {
-        hls = new Hls({ liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 5 });
+        if (isRecording) {
+          // 直播模式：低延迟配置
+          hls = new Hls({
+            liveSyncDurationCount: 3,
+            liveMaxLatencyDurationCount: 5,
+            maxBufferLength: 10,
+          });
+        } else {
+          // 回放模式：预加载配置，支持快速 seek
+          hls = new Hls({
+            maxBufferLength: 30,
+            maxMaxBufferLength: 60,
+            startFragPrefetch: true,
+            enableWorker: true,
+          });
+        }
         hls.loadSource(hlsUrl);
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          video.play().catch(() => {});
+          if (!isRecording) {
+            // 回放模式不自动播放，从头开始
+            video.currentTime = 0;
+          } else {
+            video.play().catch(() => {});
+          }
         });
       } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
         video.src = hlsUrl;
@@ -858,7 +878,9 @@ function DanmakuRow({ event, formatMs }: { event: DanmakuEvent; formatMs: (ms: n
   return (
     <div className={`danmaku-item type-${event.event_type}`}>
       <span className="danmaku-item-time">{formatMs(event.timestamp_ms)}</span>
-      {event.user_id && <span className="danmaku-item-user">{event.user_id}</span>}
+      {(event.user_name || event.user_id) && (
+        <span className="danmaku-item-user">{event.user_name || event.user_id}</span>
+      )}
       <span className="danmaku-item-text">{event.text}</span>
       {event.price > 0 && <span className="danmaku-item-price">¥{event.price}</span>}
     </div>

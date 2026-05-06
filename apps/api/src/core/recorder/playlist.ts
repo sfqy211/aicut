@@ -162,7 +162,7 @@ export function generateM3u8(sessionId: number): string {
   const lines: string[] = [
     "#EXTM3U",
     "#EXT-X-VERSION:6",
-    "#EXT-X-PLAYLIST-TYPE:EVENT",
+    playlist.ended ? "#EXT-X-PLAYLIST-TYPE:VOD" : "#EXT-X-PLAYLIST-TYPE:EVENT",
     "#EXT-X-TARGETDURATION:10",
   ];
 

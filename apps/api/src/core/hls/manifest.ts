@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { config } from "../../config.js";
-import { getPlaylist, generateM3u8 as generateFromPlaylist } from "../recorder/playlist.js";
+import { getPlaylist, generateM3u8 as generateFromPlaylist, restoreSessionPlaylist } from "../recorder/playlist.js";
+import { getDb, row } from "../../db/index.js";
 
 export type SegmentInfo = {
   id: string;
@@ -16,9 +17,26 @@ export type SessionManifest = {
 
 /**
  * 从 playlist 获取 session manifest（只读适配层）
+ * 如果内存中没有，尝试从磁盘恢复
  */
 export function getManifest(sessionId: number): SessionManifest | undefined {
-  const playlist = getPlaylist(sessionId);
+  let playlist = getPlaylist(sessionId);
+
+  // 内存中没有，尝试从磁盘恢复
+  if (!playlist) {
+    const session = row<{ source_id: number; live_id: string; room_id?: string }>(
+      getDb().prepare(
+        `SELECT sessions.source_id, sessions.live_id, sources.room_id
+         FROM sessions LEFT JOIN sources ON sources.id = sessions.source_id
+         WHERE sessions.id = ?`
+      ),
+      sessionId
+    );
+    if (session?.room_id && session.live_id) {
+      playlist = restoreSessionPlaylist(sessionId, session.room_id, session.live_id) ?? undefined;
+    }
+  }
+
   if (!playlist) return undefined;
   return {
     sessionId,
