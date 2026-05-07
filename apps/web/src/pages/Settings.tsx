@@ -11,6 +11,89 @@ type BilibiliAccount = {
   created_at: number;
 };
 
+function AnalysisSettings({
+  densityK,
+  minGrade,
+  onSave,
+}: {
+  densityK: number;
+  minGrade: string;
+  onSave: () => void;
+}) {
+  const [k, setK] = useState(densityK);
+  const [grade, setGrade] = useState(minGrade);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const kPercent = Math.round(((k - 1.0) / 3.0) * 100);
+
+  async function save() {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await apiPatch("/api/settings/analysis", {
+        densityK: k,
+        minGrade: grade,
+      });
+      onSave();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "保存失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <label className="settings-field">
+        <span className="settings-label">
+          弹幕密度敏感度: {kPercent}%
+          <span className="text-muted" style={{ fontSize: 11, marginLeft: 8 }}>
+            (k={k.toFixed(2)})
+          </span>
+        </span>
+        <input
+          type="range"
+          min="1.0"
+          max="4.0"
+          step="0.1"
+          value={k}
+          onChange={(e) => setK(parseFloat(e.target.value))}
+          style={{ width: "100%", marginTop: 4 }}
+        />
+        <div className="settings-hint" style={{ display: "flex", justifyContent: "space-between" }}>
+          <span>低 (k=1.0, 50%) — 更多候选</span>
+          <span>高 (k=4.0, 100%) — 仅强峰值</span>
+        </div>
+      </label>
+
+      <label className="settings-field">
+        <span className="settings-label">最低评级筛选</span>
+        <select
+          value={grade}
+          onChange={(e) => setGrade(e.target.value)}
+          className="settings-input"
+        >
+          <option value="S">仅 S 级 — 极高质量</option>
+          <option value="A">S + A 级 — 高置信度</option>
+          <option value="B">S + A + B 级 — 中等及以上</option>
+          <option value="C">全部 — 不筛选</option>
+        </select>
+        <div className="settings-hint">
+          低于此评级的候选不会调用 LLM，减少 token 消耗
+        </div>
+      </label>
+
+      <div className="settings-actions">
+        <button className="btn btn-primary" onClick={save} disabled={saving}>
+          {saving ? "保存中..." : "保存分析设置"}
+        </button>
+        {saveError && <span className="text-error" style={{fontSize:12}}>{saveError}</span>}
+      </div>
+    </>
+  );
+}
+
 export function Settings() {
   const [settings, setSettings] = useState<SettingsMap | null>(null);
   const [llmForm, setLlmForm] = useState({ baseUrl: "", apiKey: "", model: "" });
@@ -297,6 +380,20 @@ export function Settings() {
               </span>
             )}
           </div>
+        </div>
+      </section>
+
+      {/* 分析设置 */}
+      <section className="panel">
+        <div className="panel-header">
+          <span className="panel-title">AI 分析设置</span>
+        </div>
+        <div className="panel-body settings-stack">
+          <AnalysisSettings
+            densityK={parseFloat(settings?.analysis_density_k?.value || "2.0") || 2.0}
+            minGrade={settings?.analysis_min_grade?.value ?? "A"}
+            onSave={refresh}
+          />
         </div>
       </section>
 

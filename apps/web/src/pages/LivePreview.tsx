@@ -11,11 +11,115 @@ import {
 import type { MosaicNode, MosaicPath } from "react-mosaic-component";
 import "react-mosaic-component/react-mosaic-component.css";
 import { X, Eye } from "lucide-react";
-import { apiGet, apiPost } from "../api/client";
+import { apiPost } from "../api/client";
 import { useDanmaku } from "../hooks/useDanmaku";
-import { useCandidates } from "../hooks/useCandidates";
+import { useSessionFull } from "../hooks/useSessionFull";
 import { CandidatePanel } from "../components/CandidatePanel/CandidatePanel";
 import type { DanmakuEvent, LiveTranscriptChunk, SessionDetail, Candidate, ClipSelection } from "../types";
+
+// ── 弹幕密度小图 ──
+
+function DanmakuDensityChart({
+  events,
+  candidates,
+  currentTime,
+  windowSec = 300,
+}: {
+  events: DanmakuEvent[];
+  candidates: Candidate[];
+  currentTime: number;
+  windowSec?: number;
+}) {
+  const bucketSec = 10;
+  const buckets = Math.ceil(windowSec / bucketSec);
+  const counts = new Array(buckets).fill(0);
+
+  // 收集当前窗口内的弹幕密度
+  const lastEvent = events.length > 0 ? events[events.length - 1] : undefined;
+  const nowMs = lastEvent ? lastEvent.timestamp_ms : Date.now();
+  const nowEpochSec = Math.floor(nowMs / 1000);
+  for (const ev of events) {
+    const ageSec = (nowMs - ev.timestamp_ms) / 1000;
+    const bucket = Math.floor((windowSec - ageSec) / bucketSec);
+    if (bucket >= 0 && bucket < buckets) {
+      counts[bucket]++;
+    }
+  }
+
+  const maxCount = Math.max(1, ...counts);
+  const mean = counts.reduce((a, b) => a + b, 0) / buckets;
+  const threshold = mean * 2; // 简化的 Z-score 可视化
+
+  // 候选区间高亮
+  const candidateRanges = candidates
+    .filter((c) => {
+      // candidate.start_time 是绝对纪元秒，检查是否在图表窗口内
+      const ageSec = nowEpochSec - c.start_time;
+      return ageSec >= 0 && ageSec <= windowSec;
+    })
+    .map((c) => {
+      const ageSec = nowEpochSec - c.start_time;
+      const durSec = c.duration || 0;
+      const leftRatio = (windowSec - ageSec) / windowSec;
+      const widthRatio = Math.min(durSec / windowSec, 1 - leftRatio);
+      return { id: c.id, grade: c.grade, leftRatio, widthRatio };
+    });
+
+  const width = 240;
+  const height = 36;
+  const barW = (width - 4) / buckets;
+
+  return (
+    <div className="density-mini-chart" style={{ padding: "4px 8px", borderBottom: "1px solid var(--border)" }}>
+      <svg width={width} height={height} style={{ display: "block" }}>
+        {/* 阈值线 */}
+        <line
+          x1={0} y1={height - (threshold / maxCount) * height}
+          x2={width} y2={height - (threshold / maxCount) * height}
+          stroke="var(--text-secondary)" strokeWidth={0.5} strokeDasharray="3,2" opacity={0.5}
+        />
+        {/* 柱状图 */}
+        {counts.map((c, i) => (
+          <rect
+            key={i}
+            x={i * barW + 1}
+            y={height - (c / maxCount) * height}
+            width={Math.max(1, barW - 2)}
+            height={(c / maxCount) * height}
+            fill={c >= threshold ? "var(--warning, #f59e0b)" : "var(--text-secondary)"}
+            opacity={c >= threshold ? 0.9 : 0.3}
+            rx={1}
+          />
+        ))}
+        {/* 候选区间高亮 */}
+        {candidateRanges.map((r) => {
+          const gradeColor = r.grade === "S" ? "#f59e0b" : r.grade === "A" ? "#22c55e" : "#3b82f6";
+          return (
+            <rect
+              key={r.id}
+              x={r.leftRatio * width}
+              y={0}
+              width={Math.max(2, r.widthRatio * width)}
+              height={height}
+              fill={gradeColor}
+              opacity={0.15}
+              rx={2}
+            />
+          );
+        })}
+      </svg>
+      <div className="mono" style={{ fontSize: 9, display: "flex", justifyContent: "space-between", color: "var(--text-secondary)", marginTop: 1 }}>
+        <span>-{Math.floor(windowSec / 60)}min</span>
+        {candidateRanges.length > 0 && (
+          <span style={{ color: "var(--warning, #f59e0b)" }}>
+            {candidateRanges.length} 候选
+          </span>
+        )}
+        <span>now</span>
+      </div>
+    </div>
+  );
+}
 
 type PanelKey = "video" | "subtitles" | "danmaku" | "candidates";
 
@@ -86,51 +190,41 @@ export function LivePreview({ sessionId }: Props) {
     sessionId,
     danmakuTimeWindow
   );
-  const { candidates, loading: candidatesLoading } = useCandidates(sessionId);
+  const { data: fullData, isLoading: fullLoading } = useSessionFull(sessionId);
+
+  const candidates = fullData?.candidates ?? [];
+  const candidatesLoading = fullLoading;
 
   const [selection, setSelection] = useState<ClipSelection | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [videoDuration, setVideoDuration] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
 
-  // 加载 session 详情与历史字幕
+  // 从 batch 端点的数据中提取 session 详情和解析字幕
   useEffect(() => {
-    if (sessionId == null) {
+    if (!fullData) {
       setSessionDetail(null);
       setSubtitles([]);
       setLiveSubtitle(null);
       return;
     }
-    let cancelled = false;
-    apiGet<SessionDetail>(`/api/sessions/${sessionId}`)
-      .then((detail) => {
-        if (cancelled) return;
-        setSessionDetail(detail);
-        try {
-          // 优先使用 session 级 transcript（流式 ASR 持久化）
-          const raw = detail.transcript?.segments_json;
-          if (raw) {
-            const parsed = JSON.parse(raw) as LiveTranscriptChunk[];
-            if (Array.isArray(parsed)) {
-              // 将绝对纪元秒转为相对时间（从 session 开始的偏移）
-              const sessionStart = detail.session.start_time ?? 0;
-              const relative = parsed
-                .map((s) => ({ ...s, start: s.start - sessionStart, end: s.end - sessionStart }))
-                .filter((s) => s.start >= 0);
-              setSubtitles(relative);
-            }
-          }
-        } catch {
-          // ignore
+    setSessionDetail({ session: fullData.session, transcript: fullData.transcript, segments: [], candidates: fullData.candidates } satisfies SessionDetail);
+    try {
+      const raw = fullData.transcript?.segments_json;
+      if (raw) {
+        const parsed = JSON.parse(raw) as LiveTranscriptChunk[];
+        if (Array.isArray(parsed)) {
+          const sessionStart = fullData.session.start_time ?? 0;
+          const relative = parsed
+            .map((s) => ({ ...s, start: s.start - sessionStart, end: s.end - sessionStart }))
+            .filter((s) => s.start >= 0);
+          setSubtitles(relative);
         }
-      })
-      .catch(() => {
-        if (!cancelled) setSessionDetail(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionId]);
+      }
+    } catch {
+      // ignore
+    }
+  }, [fullData]);
 
   const hlsUrl = sessionId != null ? `/api/sessions/${sessionId}/hls/playlist.m3u8` : "";
 
@@ -559,6 +653,8 @@ export function LivePreview({ sessionId }: Props) {
                 formatMs={formatMs}
                 timeMode={timeMode}
                 onTimeModeChange={setTimeMode}
+                candidates={candidates}
+                currentTime={currentTime}
               />
             )}
             {id === "candidates" && (
@@ -818,6 +914,8 @@ function DanmakuPanel({
   formatMs,
   timeMode,
   onTimeModeChange,
+  candidates,
+  currentTime,
 }: {
   danmakuListRef: React.RefObject<HTMLDivElement | null>;
   danmakuEvents: DanmakuEvent[];
@@ -829,9 +927,12 @@ function DanmakuPanel({
   formatMs: (ms: number) => string;
   timeMode: "relative" | "absolute";
   onTimeModeChange: (m: "relative" | "absolute") => void;
+  candidates: Candidate[];
+  currentTime: number;
 }) {
   return (
     <div className="live-preview-danmaku-panel">
+      <DanmakuDensityChart events={danmakuEvents} candidates={candidates} currentTime={currentTime} />
       <div className="danmaku-filter-bar">
         {DANMAKU_FILTERS.map((f) => (
           <button

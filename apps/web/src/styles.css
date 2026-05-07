@@ -1104,6 +1104,37 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   color: var(--text-secondary);
 }
 
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-label {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.settings-input,
+.settings-field select {
+  padding: 6px 10px;
+  background: var(--border);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.settings-input:focus,
+.settings-field select:focus {
+  border-color: var(--accent);
+}
+
 .settings-bilibili-account {
   display: flex;
   align-items: center;

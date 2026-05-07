@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { apiGet, apiPost } from "../api/client";
 import { useEventStream } from "../hooks/useEventStream";
 import type { Candidate, CandidateDetail, ExportJob } from "../types";
@@ -24,12 +24,69 @@ function formatDuration(seconds: number): string {
   return `${m}分${s}秒`;
 }
 
+// ── 评分组件 ──
+
+const GRADE_COLORS: Record<string, string> = {
+  S: "#f59e0b",
+  A: "#22c55e",
+  B: "#3b82f6",
+  C: "#6b7280",
+};
+
+const GRADE_ORDER: Record<string, number> = { S: 4, A: 3, B: 2, C: 1 };
+
+function ScoreBadge({ score, grade }: { score: number; grade: string }) {
+  const color = GRADE_COLORS[grade] ?? GRADE_COLORS.C;
+  return (
+    <span
+      className="score-badge"
+      style={{ background: color, color: "#fff", fontSize: 11, fontWeight: 700, padding: "1px 6px", borderRadius: 3, whiteSpace: "nowrap" }}
+      title={`综合评分 ${score} 分 · ${grade}级`}
+    >
+      {score} · {grade}
+    </span>
+  );
+}
+
+function ScoreDetail({ detail }: { detail: string }) {
+  let parsed: Record<string, number> | null = null;
+  try {
+    parsed = JSON.parse(detail);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed.density !== "number") return null;
+
+  const bars: { label: string; value: number; key: string }[] = [
+    { label: "密度", value: parsed.density ?? 0, key: "density" },
+    { label: "重复", value: parsed.repeat ?? 0, key: "repeat" },
+    { label: "情绪", value: parsed.emotion ?? 0, key: "emotion" },
+    { label: "加速", value: parsed.acceleration ?? 0, key: "acceleration" },
+    { label: "SC", value: parsed.scWeight ?? 0, key: "scWeight" },
+  ];
+
+  return (
+    <div className="score-detail" style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+      {bars.map((b) => (
+        <div key={b.key} style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 10 }}>
+          <span style={{ color: "var(--text-secondary)", width: 22 }}>{b.label}</span>
+          <div className="bar-bg" style={{ width: 36, height: 3 }}>
+            <div className="bar-fill accent" style={{ width: `${b.value}%` }} />
+          </div>
+          <span className="mono" style={{ fontSize: 10, width: 20 }}>{b.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function Review() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<CandidateDetail | null>(null);
   const [draftRange, setDraftRange] = useState<{ start: number; end: number } | null>(null);
   const [filter, setFilter] = useState<"pending" | "approved" | "rejected" | "all">("pending");
+  const [sortBy, setSortBy] = useState<"time" | "score" | "grade">("score");
   const [exports, setExports] = useState<ExportJob[]>([]);
   const [exportsExpanded, setExportsExpanded] = useState(false);
   const lastEvent = useEventStream();
@@ -42,8 +99,33 @@ export function Review() {
   }
 
   useEffect(() => {
-    void refresh();
+    if (!lastEvent || lastEvent === "candidates.generated" || lastEvent === "candidates.updated") {
+      void refresh();
+    }
   }, [filter, lastEvent]);
+
+  // Initial load when filter changes (no event needed)
+  useEffect(() => {
+    void refresh();
+  }, [filter]);
+
+  // 排序后的候选列表
+  const sortedCandidates = useMemo(() => {
+    const arr = [...candidates];
+    switch (sortBy) {
+      case "score":
+        arr.sort((a, b) => b.score - a.score);
+        break;
+      case "grade":
+        arr.sort((a, b) => (GRADE_ORDER[b.grade] ?? 0) - (GRADE_ORDER[a.grade] ?? 0) || b.score - a.score);
+        break;
+      case "time":
+      default:
+        arr.sort((a, b) => a.start_time - b.start_time);
+        break;
+    }
+    return arr;
+  }, [candidates, sortBy]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -107,6 +189,17 @@ export function Review() {
         <button className={`filter-btn ${filter === "all" ? "active" : ""}`} onClick={() => setFilter("all")}>
           全部
         </button>
+        <span className="toolbar-sep" />
+        <span className="toolbar-label">排序:</span>
+        <button className={`filter-btn ${sortBy === "score" ? "active" : ""}`} onClick={() => setSortBy("score")}>
+          ⭐ 评分
+        </button>
+        <button className={`filter-btn ${sortBy === "grade" ? "active" : ""}`} onClick={() => setSortBy("grade")}>
+          🏷 评级
+        </button>
+        <button className={`filter-btn ${sortBy === "time" ? "active" : ""}`} onClick={() => setSortBy("time")}>
+          ⏱ 时间
+        </button>
         {pendingCount > 0 && (
           <button className="btn btn-sm bulk-action" onClick={bulkApprove}>
             全部批准
@@ -121,18 +214,22 @@ export function Review() {
       ) : (
         <div className="review-grid review-grid-player">
           <div className="candidate-list">
-            {candidates.map((candidate) => (
+            {sortedCandidates.map((candidate) => (
               <div
                 key={candidate.id}
                 className={`candidate-card ${candidate.id === selectedId ? "selected" : ""} ${candidate.status}`}
                 onClick={() => setSelectedId((current) => (current === candidate.id ? null : candidate.id))}
               >
                 <div className="card-content">
-                  <span className="card-time mono">{formatTime(candidate.start_time)} - {formatTime(candidate.end_time)}</span>
+                  <div className="card-header-row">
+                    <span className="card-time mono">{formatTime(candidate.start_time)} - {formatTime(candidate.end_time)}</span>
+                    <ScoreBadge score={candidate.score} grade={candidate.grade} />
+                  </div>
                   <div className="card-meta">
                     <span>{formatDuration(candidate.duration)}</span>
                   </div>
                   {candidate.ai_description && <p className="card-highlight">{candidate.ai_description}</p>}
+                  {candidate.score_detail && <ScoreDetail detail={candidate.score_detail} />}
                   {candidate.status !== "pending" && (
                     <span className={`status-badge ${candidate.status}`}>
                       {candidate.status === "approved" ? "已批准" : "已驳回"}
