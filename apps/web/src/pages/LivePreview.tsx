@@ -777,7 +777,7 @@ function VideoPanel({
   return (
     <div className="live-preview-video-wrap" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div style={{ position: "relative", flex: 1, minHeight: 0, overflow: "hidden" }}>
-        <video ref={playerRef} controls style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+        <video ref={playerRef} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
         {!isLiveMode && isRecording && (
           <button className="btn btn-sm live-preview-back-to-live" onClick={onBackToLive}>
             回到最新
