@@ -90,17 +90,28 @@ export async function analyzeWindow(
 ): Promise<number | null> {
   const windowData = collectWindowData(sessionId, sinceMs, untilMs);
 
+  console.log(
+    `[Analysis] Session ${sessionId}: window ${new Date(sinceMs).toLocaleTimeString()} ~ ${new Date(untilMs).toLocaleTimeString()}, ` +
+    `transcript=${windowData.transcriptText.length}chars, danmaku=${windowData.danmakuLines.length}, sc=${windowData.scLines.length}`
+  );
+
   // 跳过空窗口
   if (
     !windowData.transcriptText &&
     windowData.danmakuLines.length === 0 &&
     windowData.scLines.length === 0
   ) {
+    console.log(`[Analysis] Session ${sessionId}: empty window, skipping`);
     return null;
   }
 
   const description = await describeWithLLM(windowData);
-  if (!description) return null;
+  if (!description) {
+    console.log(`[Analysis] Session ${sessionId}: LLM returned null`);
+    return null;
+  }
+
+  console.log(`[Analysis] Session ${sessionId}: description="${description.slice(0, 80)}..."`);
 
   const startTimeSec = Math.floor(sinceMs / 1000);
   const endTimeSec = Math.floor(untilMs / 1000);

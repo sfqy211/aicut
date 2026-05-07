@@ -74,9 +74,11 @@ function buildUserPrompt(data: WindowDataForLLM): string {
 export async function describeWithLLM(data: WindowDataForLLM): Promise<string | null> {
   const config = getLLMConfig();
   if (!config) {
-    console.warn("[LLM] Not configured, skipping description");
+    console.warn("[LLM] Not configured (apiKey or baseUrl missing), skipping description");
     return null;
   }
+
+  console.log(`[LLM] Calling ${config.model} at ${config.baseUrl}...`);
 
   const endpoint = resolveEndpoint(config);
   const headers = buildHeaders(config);
@@ -109,12 +111,18 @@ export async function describeWithLLM(data: WindowDataForLLM): Promise<string | 
       }
 
       if (!response.ok) {
-        console.error(`[LLM] HTTP ${response.status}`);
+        const errBody = await response.text().catch(() => "");
+        console.error(`[LLM] HTTP ${response.status}: ${errBody.slice(0, 200)}`);
         return null;
       }
 
       const result = await response.json();
       const text = extractText(config, result);
+      if (text) {
+        console.log(`[LLM] Success: "${text.slice(0, 60)}..."`);
+      } else {
+        console.warn("[LLM] Response parsed but no text extracted:", JSON.stringify(result).slice(0, 200));
+      }
       return text?.trim() || null;
     } catch (err) {
       if (attempt >= 3) {
@@ -159,7 +167,7 @@ function buildPayload(config: LLMConfig, input: { system: string; user: string }
     return {
       model: config.model,
       system: input.system,
-      max_tokens: 300,
+      max_tokens: 131072,
       temperature: 0.3,
       messages: [{ role: "user", content: input.user }],
     };
@@ -170,7 +178,7 @@ function buildPayload(config: LLMConfig, input: { system: string; user: string }
       { role: "system", content: input.system },
       { role: "user", content: input.user },
     ],
-    max_tokens: 300,
+    max_tokens: 131072,
     temperature: 0.3,
   };
 }
@@ -184,5 +192,8 @@ function extractText(config: LLMConfig, data: Record<string, unknown>): string |
       .join("\n")
       .trim() || null;
   }
-  return (data?.choices as Array<{ message?: { content?: string } }>)?.[0]?.message?.content ?? null;
+  const choice = (data?.choices as Array<{ message?: { content?: string; reasoning_content?: string } }>)?.[0];
+  if (!choice?.message) return null;
+  // Reasoning models (e.g. MiMo) may put output in reasoning_content when content is empty
+  return choice.message.content || choice.message.reasoning_content || null;
 }
