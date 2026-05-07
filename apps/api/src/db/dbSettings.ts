@@ -60,6 +60,19 @@ export function getLlmApiFormat(): "openai" | "anthropic" {
   return readSetting("llm_api_format") === "anthropic" ? "anthropic" : "openai";
 }
 
+/** 弹幕密度阈值 k (Z-score 倍数)，默认 2.0 */
+export function getDensityK(): number {
+  const val = readSetting("analysis_density_k");
+  const parsed = parseFloat(val);
+  return (Number.isFinite(parsed) && parsed >= 1.0 && parsed <= 4.0) ? parsed : 2.0;
+}
+
+/** 候选最低评级筛选，默认 "A" */
+export function getAnalysisMinGrade(): string {
+  const val = readSetting("analysis_min_grade") || "A";
+  return ["S", "A", "B", "C"].includes(val) ? val : "A";
+}
+
 /** 写入设置 */
 export function setSetting(key: string, value: string): void {
   const db = getDb();

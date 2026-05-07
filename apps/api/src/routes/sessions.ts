@@ -54,8 +54,6 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
       segments: rows(
         db.prepare(
           `SELECT segments.*,
-                  @fullText AS transcript_text,
-                  @segmentsJson AS segments_json,
                   COUNT(danmaku_events.id) AS danmaku_count
            FROM segments
            LEFT JOIN danmaku_events ON danmaku_events.segment_id = segments.id
@@ -66,6 +64,32 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
         params.id
       ).map((s: any) => ({ ...s, transcript_text: transcript?.full_text ?? null, segments_json: transcript?.segments_json ?? null })),
       candidates: rows(db.prepare("SELECT * FROM candidates WHERE session_id = ? ORDER BY created_at DESC"), params.id)
+    };
+  });
+
+  // 批量查询：一次请求返回 session 详情 + candidates + exports
+  app.get("/sessions/:id/full", async (request, reply) => {
+    const params = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
+    const db = getDb();
+    const session = row(db.prepare("SELECT * FROM sessions WHERE id = ?"), params.id);
+    if (!session) return reply.notFound("Session not found");
+
+    const transcript = row<{ full_text: string | null; segments_json: string | null }>(
+      db.prepare("SELECT full_text, segments_json FROM transcripts WHERE session_id = ?"),
+      params.id
+    );
+
+    return {
+      session,
+      transcript: transcript ? { full_text: transcript.full_text, segments_json: transcript.segments_json } : null,
+      candidates: rows(
+        db.prepare("SELECT * FROM candidates WHERE session_id = ? ORDER BY score DESC, created_at DESC"),
+        params.id
+      ),
+      exports: rows(
+        db.prepare("SELECT id, session_id, candidate_ids, output_path, status, progress, error_msg, created_at FROM exports WHERE session_id = ? ORDER BY created_at DESC LIMIT 30"),
+        params.id
+      ),
     };
   });
 

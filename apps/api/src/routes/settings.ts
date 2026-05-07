@@ -41,6 +41,8 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
       llm_model: { value: null, updatedAt: 0 },
       asr_api_key: { value: null, updatedAt: 0 },
       asr_resource_id: { value: "volc.seedasr.sauc.duration", updatedAt: 0 },
+      analysis_density_k: { value: "2.0", updatedAt: 0 },
+      analysis_min_grade: { value: "A", updatedAt: 0 },
     };
 
     for (const setting of settings) {
@@ -53,6 +55,24 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     }
 
     return result;
+  });
+
+  // 保存分析配置
+  app.patch("/settings/analysis", async (request) => {
+    const input = z.object({
+      densityK: z.number().min(1.0).max(4.0).optional(),
+      minGrade: z.enum(["S", "A", "B", "C"]).optional(),
+    }).parse(request.body);
+
+    const entries: Record<string, string> = {};
+    if (input.densityK !== undefined) entries.analysis_density_k = String(input.densityK);
+    if (input.minGrade !== undefined) entries.analysis_min_grade = input.minGrade;
+
+    if (Object.keys(entries).length === 0) return { updated: false };
+
+    setSettings(entries);
+    refreshSettings();
+    return { updated: true, fields: Object.keys(entries) };
   });
 
   // 保存 LLM 配置

@@ -162,6 +162,12 @@ export function endSessionPlaylist(sessionId: number): void {
 
   playlist.ended = true;
   writePlaylistM3u8(playlist.roomId, playlist.liveId, playlist);
+
+  // Clean up segment index after a delay (allow pending requests to complete)
+  setTimeout(() => {
+    segmentBySequence.delete(sessionId);
+    playlists.delete(sessionId);
+  }, 60_000); // 1 minute delay
 }
 
 /**
