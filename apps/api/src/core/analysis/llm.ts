@@ -33,6 +33,10 @@ interface WindowDataForLLM {
   transcriptText: string;
   danmakuLines: string[];
   scLines: string[];
+  /** 弹幕密度 Z-score (来自 density.ts) */
+  zScore?: number;
+  /** 启发式预评分 (来自 scoring.ts) */
+  heuristicScore?: number;
 }
 
 const SYSTEM_PROMPT = `你是直播内容分析助手。根据提供的字幕和弹幕数据，用简洁的中文描述这段时间内发生了什么。
@@ -45,6 +49,18 @@ const SYSTEM_PROMPT = `你是直播内容分析助手。根据提供的字幕和
 
 function buildUserPrompt(data: WindowDataForLLM): string {
   const parts: string[] = [];
+
+  // 密度上下文
+  if (data.zScore !== undefined || data.heuristicScore !== undefined) {
+    const ctx: string[] = [];
+    if (data.zScore !== undefined) {
+      ctx.push(`弹幕密度 Z-score=${data.zScore.toFixed(1)}`);
+    }
+    if (data.heuristicScore !== undefined) {
+      ctx.push(`预评分=${data.heuristicScore}/100`);
+    }
+    parts.push(`【窗口分析上下文】\n${ctx.join("，")}`);
+  }
 
   if (data.transcriptText) {
     parts.push(`【字幕文本】\n${data.transcriptText}`);
@@ -138,6 +154,12 @@ export async function describeWithLLM(data: WindowDataForLLM): Promise<string | 
 // ── HTTP 工具函数 ──
 
 function resolveEndpoint(config: LLMConfig): string {
+  let base = config.baseUrl;
+  // Security: only allow http/https
+  if (!/^https?:\/\//i.test(base)) {
+    throw new Error(`LLM base URL must start with http:// or https://, got: ${base.slice(0, 30)}`);
+  }
+
   if (config.apiFormat === "anthropic") {
     if (config.baseUrl.endsWith("/messages")) return config.baseUrl;
     if (config.baseUrl.endsWith("/v1")) return `${config.baseUrl}/messages`;
@@ -167,7 +189,7 @@ function buildPayload(config: LLMConfig, input: { system: string; user: string }
     return {
       model: config.model,
       system: input.system,
-      max_tokens: 131072,
+      max_tokens: 1024,
       temperature: 0.3,
       messages: [{ role: "user", content: input.user }],
     };
@@ -178,7 +200,7 @@ function buildPayload(config: LLMConfig, input: { system: string; user: string }
       { role: "system", content: input.system },
       { role: "user", content: input.user },
     ],
-    max_tokens: 131072,
+    max_tokens: 1024,
     temperature: 0.3,
   };
 }
