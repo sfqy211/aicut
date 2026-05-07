@@ -32,6 +32,18 @@ export interface SessionPlaylist {
 // 内存中的 manifest 缓存
 const playlists = new Map<number, SessionPlaylist>();
 
+// segment 序列号 → entry 的快速索引 (O(1) 查找)
+const segmentBySequence = new Map<number, Map<number, SegmentEntry>>();
+
+function indexSegment(sessionId: number, entry: SegmentEntry): void {
+  let idx = segmentBySequence.get(sessionId);
+  if (!idx) {
+    idx = new Map();
+    segmentBySequence.set(sessionId, idx);
+  }
+  idx.set(entry.sequence, entry);
+}
+
 /**
  * 获取或创建内存中的 session playlist
  */
@@ -102,6 +114,12 @@ export function restoreSessionPlaylist(
   }
 
   playlists.set(sessionId, playlist);
+
+  // 构建 O(1) 序列号索引
+  for (const seg of playlist.segments) {
+    indexSegment(sessionId, seg);
+  }
+
   return playlist;
 }
 
@@ -122,6 +140,9 @@ export function addSegment(
 
   const fullEntry: SegmentEntry = { ...entry, startOffset };
   playlist.segments.push(fullEntry);
+
+  // 更新 O(1) 序列号索引
+  indexSegment(sessionId, fullEntry);
 
   // 追加到 entries.log
   appendEntryLog(roomId, liveId, entry);
@@ -179,15 +200,13 @@ export function generateM3u8(sessionId: number): string {
 }
 
 /**
- * 根据 sequence 查找 segment 文件路径
+ * 根据 sequence 查找 segment 文件路径 (O(1) Map 查找)
  */
 export function getSegmentBySequence(
   sessionId: number,
   sequence: number
 ): SegmentEntry | undefined {
-  const playlist = playlists.get(sessionId);
-  if (!playlist) return undefined;
-  return playlist.segments.find((s) => s.sequence === sequence);
+  return segmentBySequence.get(sessionId)?.get(sequence);
 }
 
 // --- 本地文件操作 ---

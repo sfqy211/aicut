@@ -70,9 +70,23 @@ export function LivePreview({ sessionId }: Props) {
   const [timeMode, setTimeMode] = useState<"relative" | "absolute">("relative");
   const danmakuAutoScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { events: danmakuEvents, loading: danmakuLoading } = useDanmaku(sessionId);
-  const { candidates, loading: candidatesLoading } = useCandidates(sessionId);
   const isRecording = sessionDetail?.session.status === "recording";
+
+  // 回放模式：按播放位置加载弹幕时间窗口 (±5 分钟)
+  // 直播模式：全量加载 + SSE 实时推送
+  const danmakuTimeWindow = useMemo(() => {
+    if (isRecording || !sessionDetail?.session.start_time) return undefined;
+    return {
+      currentTime,
+      sessionStartSec: sessionDetail.session.start_time,
+    };
+  }, [isRecording, currentTime, sessionDetail?.session.start_time]);
+
+  const { events: danmakuEvents, loading: danmakuLoading } = useDanmaku(
+    sessionId,
+    danmakuTimeWindow
+  );
+  const { candidates, loading: candidatesLoading } = useCandidates(sessionId);
 
   const [selection, setSelection] = useState<ClipSelection | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);

@@ -90,12 +90,29 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/sessions/:id/danmaku", async (request, reply) => {
     const params = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
-    const query = z.object({ since: z.coerce.number().optional() }).parse(request.query);
+    const query = z.object({
+      since: z.coerce.number().optional(),
+      from: z.coerce.number().optional(),
+      to: z.coerce.number().optional(),
+    }).parse(request.query);
     const db = getDb();
 
     const session = row(db.prepare("SELECT id FROM sessions WHERE id = ?"), params.id);
     if (!session) return reply.notFound("Session not found");
 
+    // 时间范围模式 (from/to): 用于播放模式的窗口加载
+    if (query.from !== undefined && query.to !== undefined) {
+      const sql = `
+        SELECT id, event_type, timestamp_ms, text, user_id, user_name, price
+        FROM danmaku_events
+        WHERE session_id = ? AND timestamp_ms >= ? AND timestamp_ms <= ?
+        ORDER BY timestamp_ms ASC
+        LIMIT 5000
+      `;
+      return rows(db.prepare(sql), [params.id, query.from, query.to]);
+    }
+
+    // since 模式: SSE 增量拉取
     const since = query.since;
     const sql = `
       SELECT id, event_type, timestamp_ms, text, user_id, user_name, price

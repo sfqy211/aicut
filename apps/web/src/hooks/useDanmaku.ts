@@ -2,18 +2,31 @@ import { useEffect, useRef, useState } from "react";
 import { apiGet } from "../api/client";
 import type { DanmakuEvent } from "../types";
 
-export function useDanmaku(sessionId: number | null) {
+/**
+ * Danmaku 加载 Hook。
+ *
+ * 两种模式：
+ * 1. 直播模式 (timeWindow == null): 全量加载 + SSE 实时增量
+ * 2. 回放模式 (timeWindow != null): 按播放位置 ± timeWindow 时间窗口加载，
+ *    用户 seek 超过阈值时自动重新加载新窗口。
+ */
+export function useDanmaku(
+  sessionId: number | null,
+  timeWindow?: { currentTime: number; sessionStartSec: number }
+) {
   const [events, setEvents] = useState<DanmakuEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const lastIdRef = useRef<number>(0);
   const lastTimestampRef = useRef<number>(-1);
+  // 回放模式：记录已加载的时间窗口，避免重复请求
+  const loadedWindowRef = useRef<{ fromMs: number; toMs: number } | null>(null);
 
-  // 全量加载
+  const isPlaybackMode = timeWindow != null;
+
+  // ── 直播模式：全量加载 ──
   useEffect(() => {
-    if (sessionId == null) {
-      setEvents([]);
-      lastIdRef.current = 0;
-      lastTimestampRef.current = -1;
+    if (sessionId == null || isPlaybackMode) {
+      // 回放模式不在这里加载
       return;
     }
 
@@ -40,22 +53,63 @@ export function useDanmaku(sessionId: number | null) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [sessionId, isPlaybackMode]);
 
-  // SSE 增量更新：监听实时弹幕 + 批量导入完成
+  // ── 回放模式：时间窗口加载 ──
   useEffect(() => {
-    if (sessionId == null) return;
+    if (sessionId == null || !isPlaybackMode) return;
+
+    const WINDOW_SEC = 300; // ±5 分钟
+    const { currentTime, sessionStartSec } = timeWindow;
+
+    // 将相对时间 (秒) 转为绝对毫秒
+    const centerMs = (sessionStartSec + currentTime) * 1000;
+    const fromMs = Math.max(0, centerMs - WINDOW_SEC * 1000);
+    const toMs = centerMs + WINDOW_SEC * 1000;
+
+    // 去重：如果新窗口完全在已加载窗口内，跳过
+    const prev = loadedWindowRef.current;
+    if (prev && fromMs >= prev.fromMs && toMs <= prev.toMs) {
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+
+    apiGet<DanmakuEvent[]>(
+      `/api/sessions/${sessionId}/danmaku?from=${Math.floor(fromMs)}&to=${Math.floor(toMs)}`
+    )
+      .then((data) => {
+        if (cancelled) return;
+        setEvents(data);
+        loadedWindowRef.current = { fromMs, toMs };
+      })
+      .catch(() => {
+        if (!cancelled) setEvents([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, isPlaybackMode, timeWindow?.currentTime]);
+
+  // ── SSE 增量 (仅直播模式) ──
+  useEffect(() => {
+    if (sessionId == null || isPlaybackMode) return;
 
     const es = new EventSource("/api/events/stream");
 
-    // 实时弹幕：直接追加，无需请求 API
+    // 实时弹幕：直接追加
     const realtimeHandler = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
         if (data.type === "danmaku.received" && data.payload?.sessionId === sessionId) {
           const p = data.payload;
           const ev: DanmakuEvent = {
-            id: -p.timestampMs, // 临时负 ID，避免与 DB 自增 ID 冲突
+            id: -p.timestampMs,
             event_type: p.type,
             timestamp_ms: p.timestampMs,
             text: p.text,
@@ -76,7 +130,7 @@ export function useDanmaku(sessionId: number | null) {
       }
     };
 
-    // 批量导入完成：重新拉取确保数据完整
+    // 批量导入完成：增量拉取
     const importedHandler = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
@@ -117,7 +171,7 @@ export function useDanmaku(sessionId: number | null) {
       es.removeEventListener("segment.danmaku_imported", importedHandler);
       es.close();
     };
-  }, [sessionId]);
+  }, [sessionId, isPlaybackMode]);
 
   return { events, loading };
 }
