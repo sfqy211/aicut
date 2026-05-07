@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { SidebarProvider, useSidebar } from "./contexts/SidebarContext";
 import { SystemRail } from "./components/SystemRail";
@@ -8,6 +9,15 @@ import { Settings } from "./pages/Settings";
 import { Sessions } from "./pages/Sessions";
 import { Sources } from "./pages/Sources";
 import { ArrowLeft } from "lucide-react";
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 10_000,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 function AppContent() {
   const [page, setPage] = useState("sources");
@@ -70,10 +80,12 @@ function AppContent() {
 
 export function App() {
   return (
-    <ThemeProvider>
-      <SidebarProvider>
-        <AppContent />
-      </SidebarProvider>
-    </ThemeProvider>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <SidebarProvider>
+          <AppContent />
+        </SidebarProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
   );
 }

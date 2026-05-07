@@ -11,6 +11,7 @@
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.100.9",
     "@vidstack/react": "^0.6.15",
     "@vitejs/plugin-react": "^4.3.4",
     "hls.js": "^1.5.20",

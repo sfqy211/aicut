@@ -76,6 +76,14 @@ export type SessionDetail = {
   candidates: Candidate[];
 };
 
+/** /api/sessions/:id/full 批量端点的返回类型（不含 segments） */
+export type SessionFullData = {
+  session: Session;
+  transcript: { full_text: string | null; segments_json: string | null } | null;
+  candidates: Candidate[];
+  exports: ExportJob[];
+};
+
 export type Candidate = {
   id: number;
   session_id: number;
@@ -83,6 +91,9 @@ export type Candidate = {
   end_time: number;
   duration: number;
   ai_description: string | null;
+  score: number;
+  score_detail: string | null;
+  grade: "S" | "A" | "B" | "C";
   status: "pending" | "approved" | "rejected";
   user_note?: string | null;
   created_at: number;

@@ -18,6 +18,7 @@ export function useDanmaku(
   const [loading, setLoading] = useState(false);
   const lastIdRef = useRef<number>(0);
   const lastTimestampRef = useRef<number>(-1);
+  const realtimeSeqRef = useRef(0);
   // 回放模式：记录已加载的时间窗口，避免重复请求
   const loadedWindowRef = useRef<{ fromMs: number; toMs: number } | null>(null);
 
@@ -109,7 +110,7 @@ export function useDanmaku(
         if (data.type === "danmaku.received" && data.payload?.sessionId === sessionId) {
           const p = data.payload;
           const ev: DanmakuEvent = {
-            id: -p.timestampMs,
+            id: -(realtimeSeqRef.current++),
             event_type: p.type,
             timestamp_ms: p.timestampMs,
             text: p.text,
