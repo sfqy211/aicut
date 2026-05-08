@@ -61,7 +61,10 @@ function AnalysisSettings({
           onChange={(e) => setK(parseFloat(e.target.value))}
           style={{ width: "100%", marginTop: 4 }}
         />
-        <div className="settings-hint" style={{ display: "flex", justifyContent: "space-between" }}>
+        <div
+          className="settings-hint"
+          style={{ display: "flex", justifyContent: "space-between" }}
+        >
           <span>低 (k=1.0, 50%) — 更多候选</span>
           <span>高 (k=4.0, 100%) — 仅强峰值</span>
         </div>
@@ -88,7 +91,11 @@ function AnalysisSettings({
         <button className="btn btn-primary" onClick={save} disabled={saving}>
           {saving ? "保存中..." : "保存分析设置"}
         </button>
-        {saveError && <span className="text-error" style={{fontSize:12}}>{saveError}</span>}
+        {saveError && (
+          <span className="text-error" style={{ fontSize: 12 }}>
+            {saveError}
+          </span>
+        )}
       </div>
     </>
   );
@@ -96,12 +103,25 @@ function AnalysisSettings({
 
 export function Settings() {
   const [settings, setSettings] = useState<SettingsMap | null>(null);
-  const [llmForm, setLlmForm] = useState({ baseUrl: "", apiKey: "", model: "" });
+  const [snapshotBusy, setSnapshotBusy] = useState<"export" | "import" | null>(null);
+  const [snapshotResult, setSnapshotResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [llmForm, setLlmForm] = useState({
+    baseUrl: "",
+    apiKey: "",
+    model: "",
+  });
   const [asrForm, setAsrForm] = useState({ apiKey: "", resourceId: "" });
   const [saving, setSaving] = useState<"llm" | "asr" | null>(null);
   const [showKeys, setShowKeys] = useState(false);
-  const [llmTestResult, setLlmTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
-  const [asrTestResult, setAsrTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [llmTestResult, setLlmTestResult] = useState<{
+    ok: boolean;
+    msg: string;
+  } | null>(null);
+  const [asrTestResult, setAsrTestResult] = useState<{
+    ok: boolean;
+    msg: string;
+  } | null>(null);
+  const importFileRef = useRef<HTMLInputElement | null>(null);
 
   // Bilibili multi-account state
   const [accounts, setAccounts] = useState<BilibiliAccount[]>([]);
@@ -122,14 +142,76 @@ export function Settings() {
     });
     setAsrForm({
       apiKey: nextSettings.asr_api_key?.value ?? "",
-      resourceId: nextSettings.asr_resource_id?.value ?? "volc.seedasr.sauc.duration",
+      resourceId:
+        nextSettings.asr_resource_id?.value ?? "volc.seedasr.sauc.duration",
     });
     // Fetch accounts
     try {
-      const accs = await apiGet<BilibiliAccount[]>("/api/settings/bilibili/accounts");
+      const accs = await apiGet<BilibiliAccount[]>(
+        "/api/settings/bilibili/accounts",
+      );
       setAccounts(accs);
     } catch {
       setAccounts([]);
+    }
+  }
+
+  async function exportSnapshot() {
+    setSnapshotBusy("export");
+    setSnapshotResult(null);
+    try {
+      const snapshot = await apiGet<Record<string, unknown>>("/api/settings/export");
+      const blob = new Blob([JSON.stringify(snapshot, null, 2)], {
+        type: "application/json;charset=utf-8",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `aicut-config-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setSnapshotResult({ ok: true, msg: "配置已导出" });
+    } catch (err) {
+      setSnapshotResult({
+        ok: false,
+        msg: err instanceof Error ? err.message : "导出失败",
+      });
+    } finally {
+      setSnapshotBusy(null);
+    }
+  }
+
+  function openImportPicker() {
+    importFileRef.current?.click();
+  }
+
+  async function importSnapshot(file: File) {
+    const ok = window.confirm(
+      "导入会覆盖当前 settings / sources / B站账号配置，继续吗？",
+    );
+    if (!ok) return;
+
+    setSnapshotBusy("import");
+    setSnapshotResult(null);
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text) as Record<string, unknown>;
+      const res = await apiPost<{ ok: boolean; imported?: Record<string, number> }>(
+        "/api/settings/import",
+        payload,
+      );
+      if (res.ok) {
+        await refresh();
+        setSnapshotResult({ ok: true, msg: "配置已导入" });
+      }
+    } catch (err) {
+      setSnapshotResult({
+        ok: false,
+        msg: err instanceof Error ? err.message : "导入失败",
+      });
+    } finally {
+      setSnapshotBusy(null);
+      if (importFileRef.current) importFileRef.current.value = "";
     }
   }
 
@@ -157,10 +239,19 @@ export function Settings() {
   async function testLlm() {
     setLlmTestResult(null);
     try {
-      const res = await apiPost<{ ok: boolean; msg?: string }>("/api/settings/llm/test", {});
-      setLlmTestResult({ ok: res.ok, msg: res.msg ?? (res.ok ? "连接成功" : "连接失败") });
+      const res = await apiPost<{ ok: boolean; msg?: string }>(
+        "/api/settings/llm/test",
+        {},
+      );
+      setLlmTestResult({
+        ok: res.ok,
+        msg: res.msg ?? (res.ok ? "连接成功" : "连接失败"),
+      });
     } catch (e: unknown) {
-      setLlmTestResult({ ok: false, msg: e instanceof Error ? e.message : "请求失败" });
+      setLlmTestResult({
+        ok: false,
+        msg: e instanceof Error ? e.message : "请求失败",
+      });
     }
   }
 
@@ -180,15 +271,28 @@ export function Settings() {
   async function testAsr() {
     setAsrTestResult(null);
     try {
-      const res = await apiPost<{ ok: boolean; msg?: string }>("/api/settings/asr/test", {});
-      setAsrTestResult({ ok: res.ok, msg: res.msg ?? (res.ok ? "连接成功" : "连接失败") });
+      const res = await apiPost<{ ok: boolean; msg?: string }>(
+        "/api/settings/asr/test",
+        {},
+      );
+      setAsrTestResult({
+        ok: res.ok,
+        msg: res.msg ?? (res.ok ? "连接成功" : "连接失败"),
+      });
     } catch (e: unknown) {
-      setAsrTestResult({ ok: false, msg: e instanceof Error ? e.message : "请求失败" });
+      setAsrTestResult({
+        ok: false,
+        msg: e instanceof Error ? e.message : "请求失败",
+      });
     }
   }
 
   function applyMiMoPreset() {
-    setLlmForm({ baseUrl: "https://api.xiaomimimo.com/v1", apiKey: "", model: "mimo-v2.5-pro" });
+    setLlmForm({
+      baseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
+      apiKey: "",
+      model: "mimo-v2.5-pro",
+    });
   }
 
   // --- QR Modal ---
@@ -217,7 +321,10 @@ export function Settings() {
     setQrStatus(null);
     stopPolling();
     try {
-      const res = await apiPost<{ url: string; qrcode_key: string }>("/api/settings/bilibili/qrcode", {});
+      const res = await apiPost<{ url: string; qrcode_key: string }>(
+        "/api/settings/bilibili/qrcode",
+        {},
+      );
       setQrUrl(res.url);
       setQrKey(res.qrcode_key);
       setQrPolling(true);
@@ -225,14 +332,20 @@ export function Settings() {
         void pollQr(res.qrcode_key);
       }, 2000);
     } catch (e: unknown) {
-      setQrStatus(`获取二维码失败: ${e instanceof Error ? e.message : "未知错误"}`);
+      setQrStatus(
+        `获取二维码失败: ${e instanceof Error ? e.message : "未知错误"}`,
+      );
     }
   }
 
   async function pollQr(key: string) {
     try {
-      const res = await apiGet<{ code: number; data?: { url?: string }; account?: BilibiliAccount }>(
-        `/api/settings/bilibili/qrcode/poll?qrcode_key=${encodeURIComponent(key)}`
+      const res = await apiGet<{
+        code: number;
+        data?: { url?: string };
+        account?: BilibiliAccount;
+      }>(
+        `/api/settings/bilibili/qrcode/poll?qrcode_key=${encodeURIComponent(key)}`,
       );
       if (res.code === 0 && res.account) {
         stopPolling();
@@ -276,6 +389,48 @@ export function Settings() {
     <div className="settings-layout">
       <section className="panel">
         <div className="panel-header">
+          <span className="panel-title">配置管理</span>
+        </div>
+        <div className="panel-body settings-stack">
+          <div className="settings-hint">
+            可一键导出当前用户配置，之后删除数据库重启时再导入恢复。
+          </div>
+          <div className="settings-actions">
+            <button
+              className="btn btn-primary"
+              onClick={exportSnapshot}
+              disabled={snapshotBusy !== null}
+            >
+              {snapshotBusy === "export" ? "导出中..." : "导出配置 JSON"}
+            </button>
+            <button
+              className="btn btn-sm"
+              onClick={openImportPicker}
+              disabled={snapshotBusy !== null}
+            >
+              {snapshotBusy === "import" ? "导入中..." : "导入配置 JSON"}
+            </button>
+            <input
+              ref={importFileRef}
+              type="file"
+              accept="application/json,.json"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void importSnapshot(file);
+              }}
+            />
+            {snapshotResult && (
+              <span className={snapshotResult.ok ? "text-success" : "text-error"}>
+                {snapshotResult.msg}
+              </span>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
           <span className="panel-title">LLM 配置</span>
           <span className="tag">API READY</span>
         </div>
@@ -290,7 +445,12 @@ export function Settings() {
             <input
               className="form-input"
               value={llmForm.baseUrl}
-              onChange={(event) => setLlmForm((current) => ({ ...current, baseUrl: event.target.value }))}
+              onChange={(event) =>
+                setLlmForm((current) => ({
+                  ...current,
+                  baseUrl: event.target.value,
+                }))
+              }
               placeholder="https://api.openai.com/v1"
             />
           </label>
@@ -300,11 +460,20 @@ export function Settings() {
               <input
                 className="form-input"
                 value={llmForm.apiKey}
-                onChange={(event) => setLlmForm((current) => ({ ...current, apiKey: event.target.value }))}
+                onChange={(event) =>
+                  setLlmForm((current) => ({
+                    ...current,
+                    apiKey: event.target.value,
+                  }))
+                }
                 placeholder="sk-..."
                 type={showKeys ? "text" : "password"}
               />
-              <button className="btn btn-ghost btn-sm key-toggle" onClick={() => setShowKeys((v) => !v)} title={showKeys ? "隐藏" : "显示"}>
+              <button
+                className="btn btn-ghost btn-sm key-toggle"
+                onClick={() => setShowKeys((v) => !v)}
+                title={showKeys ? "隐藏" : "显示"}
+              >
                 {showKeys ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
             </div>
@@ -314,19 +483,34 @@ export function Settings() {
             <input
               className="form-input"
               value={llmForm.model}
-              onChange={(event) => setLlmForm((current) => ({ ...current, model: event.target.value }))}
+              onChange={(event) =>
+                setLlmForm((current) => ({
+                  ...current,
+                  model: event.target.value,
+                }))
+              }
               placeholder="mimo-v2.5-pro / gpt-4o-mini"
             />
           </label>
           <div className="settings-actions">
-            <button className="btn btn-primary" onClick={saveLlm} disabled={saving === "llm"}>
+            <button
+              className="btn btn-primary"
+              onClick={saveLlm}
+              disabled={saving === "llm"}
+            >
               {saving === "llm" ? "保存中..." : "保存 LLM 配置"}
             </button>
-            <button className="btn btn-sm" onClick={testLlm} disabled={saving === "llm"}>
+            <button
+              className="btn btn-sm"
+              onClick={testLlm}
+              disabled={saving === "llm"}
+            >
               测试连接
             </button>
             {llmTestResult && (
-              <span className={llmTestResult.ok ? "text-success" : "text-error"}>
+              <span
+                className={llmTestResult.ok ? "text-success" : "text-error"}
+              >
                 {llmTestResult.msg}
               </span>
             )}
@@ -346,11 +530,17 @@ export function Settings() {
               <input
                 className="form-input"
                 value={asrForm.apiKey}
-                onChange={(e) => setAsrForm((f) => ({ ...f, apiKey: e.target.value }))}
+                onChange={(e) =>
+                  setAsrForm((f) => ({ ...f, apiKey: e.target.value }))
+                }
                 placeholder="火山引擎控制台获取"
                 type={showKeys ? "text" : "password"}
               />
-              <button className="btn btn-ghost btn-sm key-toggle" onClick={() => setShowKeys((v) => !v)} title={showKeys ? "隐藏" : "显示"}>
+              <button
+                className="btn btn-ghost btn-sm key-toggle"
+                onClick={() => setShowKeys((v) => !v)}
+                title={showKeys ? "隐藏" : "显示"}
+              >
                 {showKeys ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
             </div>
@@ -360,22 +550,35 @@ export function Settings() {
             <input
               className="form-input"
               value={asrForm.resourceId}
-              onChange={(e) => setAsrForm((f) => ({ ...f, resourceId: e.target.value }))}
+              onChange={(e) =>
+                setAsrForm((f) => ({ ...f, resourceId: e.target.value }))
+              }
               placeholder="volc.seedasr.sauc.duration"
             />
           </label>
           <div className="settings-hint">
-            豆包2.0 小时版：volc.seedasr.sauc.duration | 并发版：volc.seedasr.sauc.concurrent
+            豆包2.0 小时版：volc.seedasr.sauc.duration |
+            并发版：volc.seedasr.sauc.concurrent
           </div>
           <div className="settings-actions">
-            <button className="btn btn-primary" onClick={saveAsr} disabled={saving === "asr"}>
+            <button
+              className="btn btn-primary"
+              onClick={saveAsr}
+              disabled={saving === "asr"}
+            >
               {saving === "asr" ? "保存中..." : "保存 ASR 配置"}
             </button>
-            <button className="btn btn-sm" onClick={testAsr} disabled={saving === "asr"}>
+            <button
+              className="btn btn-sm"
+              onClick={testAsr}
+              disabled={saving === "asr"}
+            >
               测试连接
             </button>
             {asrTestResult && (
-              <span className={asrTestResult.ok ? "text-success" : "text-error"}>
+              <span
+                className={asrTestResult.ok ? "text-success" : "text-error"}
+              >
                 {asrTestResult.msg}
               </span>
             )}
@@ -390,7 +593,9 @@ export function Settings() {
         </div>
         <div className="panel-body settings-stack">
           <AnalysisSettings
-            densityK={parseFloat(settings?.analysis_density_k?.value || "2.0") || 2.0}
+            densityK={
+              parseFloat(settings?.analysis_density_k?.value || "2.0") || 2.0
+            }
             minGrade={settings?.analysis_min_grade?.value ?? "A"}
             onSave={refresh}
           />
@@ -404,25 +609,49 @@ export function Settings() {
         </div>
         <div className="panel-body settings-stack">
           {accounts.length === 0 ? (
-            <div className="text-muted" style={{ fontSize: 13 }}>暂无已登录账号</div>
+            <div className="text-muted" style={{ fontSize: 13 }}>
+              暂无已登录账号
+            </div>
           ) : (
             <div className="account-list">
               {accounts.map((acc) => (
-                <div key={acc.uid} className={`account-item ${acc.is_active ? "active" : ""}`}>
+                <div
+                  key={acc.uid}
+                  className={`account-item ${acc.is_active ? "active" : ""}`}
+                >
                   <div className="account-info">
-                    <span className="account-name">{acc.uname || `UID ${acc.uid}`}</span>
+                    <span className="account-name">
+                      {acc.uname || `UID ${acc.uid}`}
+                    </span>
                     <span className="account-uid mono">UID: {acc.uid}</span>
                     {acc.is_active ? (
-                      <span className="tag" style={{ background: "var(--accent)", color: "#fff", fontSize: 10 }}>当前使用</span>
+                      <span
+                        className="tag"
+                        style={{
+                          background: "var(--accent)",
+                          color: "#fff",
+                          fontSize: 10,
+                        }}
+                      >
+                        当前使用
+                      </span>
                     ) : null}
                   </div>
                   <div className="account-actions">
                     {!acc.is_active && (
-                      <button className="btn btn-sm btn-ghost" onClick={() => activateAccount(acc.uid)} title="切换为此账号">
+                      <button
+                        className="btn btn-sm btn-ghost"
+                        onClick={() => activateAccount(acc.uid)}
+                        title="切换为此账号"
+                      >
                         <Star size={13} /> 切换
                       </button>
                     )}
-                    <button className="btn btn-sm btn-ghost" onClick={() => deleteAccount(acc.uid)} title="删除账号">
+                    <button
+                      className="btn btn-sm btn-ghost"
+                      onClick={() => deleteAccount(acc.uid)}
+                      title="删除账号"
+                    >
                       <Trash2 size={13} />
                     </button>
                   </div>
@@ -438,11 +667,23 @@ export function Settings() {
 
       {/* QR 登录浮窗 */}
       {showQrModal && (
-        <div className="modal-overlay" onClick={() => { setShowQrModal(false); stopPolling(); }}>
+        <div
+          className="modal-overlay"
+          onClick={() => {
+            setShowQrModal(false);
+            stopPolling();
+          }}
+        >
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <span className="modal-title">扫码登录 B 站</span>
-              <button className="btn btn-ghost btn-sm" onClick={() => { setShowQrModal(false); stopPolling(); }}>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  setShowQrModal(false);
+                  stopPolling();
+                }}
+              >
                 <X size={16} />
               </button>
             </div>

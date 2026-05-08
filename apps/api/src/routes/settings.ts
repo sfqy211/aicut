@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import type { SQLInputValue } from "node:sqlite";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import WebSocket from "ws";
@@ -23,6 +24,29 @@ const asrConfigInput = z.object({
 
 const cookieConfigInput = z.object({
   cookie: z.string().optional(),
+});
+
+const settingsSnapshotInput = z.object({
+  version: z.number().int().nonnegative().optional(),
+  settings: z.array(z.object({ key: z.string(), value: z.string().nullable() })).optional(),
+  sources: z.array(z.object({
+    id: z.number().int().optional(),
+    platform: z.string().optional(),
+    room_id: z.string(),
+    streamer_name: z.string().nullable().optional(),
+    cookie: z.string().nullable().optional(),
+    auto_record: z.number().int().optional(),
+    analysis_interval: z.number().int().optional(),
+    created_at: z.number().int().nullable().optional(),
+  })).optional(),
+  bilibili_accounts: z.array(z.object({
+    uid: z.number().int(),
+    uname: z.string(),
+    face: z.string().nullable().optional(),
+    cookie: z.string(),
+    is_active: z.number().int().optional(),
+    created_at: z.number().int().nullable().optional(),
+  })).optional(),
 });
 
 export const settingsRoutes: FastifyPluginAsync = async (app) => {
@@ -55,6 +79,96 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     }
 
     return result;
+  });
+
+  // 导出当前用户配置快照
+  app.get("/settings/export", async () => {
+    const db = getDb();
+    return {
+      version: 1,
+      exportedAt: Date.now(),
+      settings: db.prepare("SELECT key, value, updated_at FROM settings ORDER BY key").all(),
+      sources: db.prepare("SELECT * FROM sources ORDER BY id ASC").all(),
+      bilibili_accounts: db.prepare("SELECT * FROM bilibili_accounts ORDER BY created_at ASC").all(),
+    };
+  });
+
+  // 导入用户配置快照
+  app.post("/settings/import", async (request) => {
+    const input = settingsSnapshotInput.parse(request.body);
+    const db = getDb();
+
+    const settingsRows = input.settings ?? [];
+    const sourcesRows = input.sources ?? [];
+    const accountRows = input.bilibili_accounts ?? [];
+
+    try {
+      db.exec("BEGIN");
+      db.prepare("DELETE FROM settings").run();
+      db.prepare("DELETE FROM bilibili_accounts").run();
+      db.prepare("DELETE FROM sources").run();
+
+      for (const row of settingsRows) {
+        db.prepare(
+          "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, unixepoch())"
+        ).run(row.key, row.value ?? null);
+      }
+
+      for (const source of sourcesRows) {
+        db.prepare(
+          `INSERT INTO sources (
+            id, platform, room_id, streamer_name, cookie, auto_record,
+            analysis_interval, created_at, updated_at
+          ) VALUES (
+            ?, ?, ?, ?, ?, ?, ?, COALESCE(?, unixepoch()), unixepoch()
+          )`
+        ).run(
+          source.id as SQLInputValue,
+          (source.platform ?? "bilibili") as SQLInputValue,
+          source.room_id as SQLInputValue,
+          (source.streamer_name ?? null) as SQLInputValue,
+          (source.cookie ?? null) as SQLInputValue,
+          (source.auto_record ?? 1) as SQLInputValue,
+          (source.analysis_interval ?? 5) as SQLInputValue,
+          (source.created_at ?? null) as SQLInputValue,
+        );
+      }
+
+      for (const account of accountRows) {
+        db.prepare(
+          `INSERT INTO bilibili_accounts (
+            uid, uname, face, cookie, is_active, created_at, updated_at
+          ) VALUES (
+            ?, ?, ?, ?, ?, COALESCE(?, unixepoch()), unixepoch()
+          )`
+        ).run(
+          account.uid as SQLInputValue,
+          (account.uname ?? "") as SQLInputValue,
+          (account.face ?? null) as SQLInputValue,
+          (account.cookie ?? "") as SQLInputValue,
+          (account.is_active ?? 0) as SQLInputValue,
+          (account.created_at ?? null) as SQLInputValue,
+        );
+      }
+      db.exec("COMMIT");
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        // ignore
+      }
+      throw error;
+    }
+
+    refreshSettings();
+    return {
+      ok: true,
+      imported: {
+        settings: settingsRows.length,
+        sources: sourcesRows.length,
+        bilibili_accounts: accountRows.length,
+      },
+    };
   });
 
   // 保存分析配置
