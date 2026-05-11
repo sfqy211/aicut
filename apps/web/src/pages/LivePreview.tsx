@@ -10,7 +10,7 @@ import {
 } from "react-mosaic-component";
 import type { MosaicNode, MosaicPath } from "react-mosaic-component";
 import "react-mosaic-component/react-mosaic-component.css";
-import { X, Eye } from "lucide-react";
+import { X, Eye, Play, Pause, Maximize, Minimize } from "lucide-react";
 import { apiPost } from "../api/client";
 import { useDanmaku } from "../hooks/useDanmaku";
 import { useSessionFull } from "../hooks/useSessionFull";
@@ -117,6 +117,179 @@ function DanmakuDensityChart({
         )}
         <span>now</span>
       </div>
+    </div>
+  );
+}
+
+function VideoProgressBar({
+  currentTime,
+  duration,
+  danmakuEvents,
+  sessionStartTime,
+  candidates,
+  selection,
+  onSeek,
+}: {
+  currentTime: number;
+  duration: number;
+  danmakuEvents: DanmakuEvent[];
+  sessionStartTime: number;
+  candidates: Candidate[];
+  selection: ClipSelection | null;
+  onSeek: (time: number) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [hover, setHover] = useState<{ x: number; time: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const formatTime = useCallback((seconds: number) => {
+    const safe = Math.max(0, seconds);
+    const h = Math.floor(safe / 3600);
+    const m = Math.floor((safe % 3600) / 60);
+    const s = Math.floor(safe % 60);
+    return h > 0
+      ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+      : `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }, []);
+
+  const densityPoints = useMemo(() => {
+    if (duration <= 0) return [] as { ts: number; count: number }[];
+    const bucketSec = 5;
+    const bucketCount = Math.max(1, Math.ceil(duration / bucketSec));
+    const counts = new Array(bucketCount).fill(0);
+    for (const ev of danmakuEvents) {
+      const relativeSec = ev.timestamp_ms / 1000 - sessionStartTime;
+      if (relativeSec < 0 || relativeSec > duration) continue;
+      const bucket = Math.min(bucketCount - 1, Math.max(0, Math.floor(relativeSec / bucketSec)));
+      counts[bucket] += 1;
+    }
+    return counts.map((count, i) => ({ ts: i * bucketSec, count }));
+  }, [danmakuEvents, duration, sessionStartTime]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => setContainerWidth(el.clientWidth);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !containerWidth || duration <= 0) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const scale = window.devicePixelRatio || 1;
+    const width = containerWidth;
+    const height = 18;
+    canvas.width = Math.max(1, Math.floor(width * scale));
+    canvas.height = Math.max(1, Math.floor(height * scale));
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+
+    if (densityPoints.length === 0) return;
+    const maxCount = Math.max(1, ...densityPoints.map((p) => p.count));
+    ctx.beginPath();
+    ctx.moveTo(0, height);
+    for (const point of densityPoints) {
+      const x = (point.ts / duration) * width;
+      const y = height - (point.count / maxCount) * (height - 2);
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(width, height);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(245, 166, 39, 0.35)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(245, 166, 39, 0.7)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }, [containerWidth, densityPoints, duration]);
+
+  const getTimeFromClientX = useCallback((clientX: number) => {
+    const el = containerRef.current;
+    if (!el || duration <= 0) return 0;
+    const rect = el.getBoundingClientRect();
+    const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
+    return (x / rect.width) * duration;
+  }, [duration]);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (duration <= 0) return;
+    e.preventDefault();
+    const time = getTimeFromClientX(e.clientX);
+    onSeek(time);
+    setDragging(true);
+  }, [duration, getTimeFromClientX, onSeek]);
+
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e: MouseEvent) => onSeek(getTimeFromClientX(e.clientX));
+    const onUp = () => setDragging(false);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [dragging, getTimeFromClientX, onSeek]);
+
+  const progress = duration > 0 ? Math.max(0, Math.min(1, currentTime / duration)) : 0;
+
+  return (
+    <div
+      ref={containerRef}
+      className="video-progress-bar"
+      onMouseDown={handleMouseDown}
+      onMouseMove={(e) => {
+        if (duration <= 0) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+        setHover({ x, time: (x / rect.width) * duration });
+      }}
+      onMouseLeave={() => setHover(null)}
+    >
+      <canvas ref={canvasRef} className="video-progress-canvas" />
+
+      {candidates.map((c) => {
+        if (duration <= 0 || !sessionStartTime) return null;
+        const start = c.start_time - sessionStartTime;
+        const end = c.end_time - sessionStartTime;
+        if (end <= 0 || start >= duration) return null;
+        const left = (Math.max(0, start) / duration) * 100;
+        const width = ((Math.min(duration, end) - Math.max(0, start)) / duration) * 100;
+        const color = c.grade === "S" ? "rgba(245, 166, 39, 0.18)" : c.grade === "A" ? "rgba(34, 197, 94, 0.16)" : "rgba(59, 130, 246, 0.14)";
+        return <div key={c.id} className="video-progress-range" style={{ left: `${left}%`, width: `${width}%`, background: color }} />;
+      })}
+
+      {selection && duration > 0 && (
+        <div
+          className="video-progress-range video-progress-selection"
+          style={{
+            left: `${Math.max(0, (selection.start / duration) * 100)}%`,
+            width: `${Math.max(0, ((selection.end - selection.start) / duration) * 100)}%`,
+          }}
+        />
+      )}
+
+      <div className="video-progress-fill" style={{ width: `${progress * 100}%` }} />
+      <div className="video-progress-playhead" style={{ left: `${progress * 100}%` }} />
+
+      <div className="video-progress-time mono">
+        {duration > 0 ? `${formatTime(currentTime)} / ${formatTime(duration)}` : "--:-- / --:--"}
+      </div>
+
+      {hover && duration > 0 && (
+        <div className="video-progress-tooltip" style={{ left: `${hover.x}px` }}>
+          {formatTime(hover.time)}
+        </div>
+      )}
     </div>
   );
 }
@@ -630,6 +803,13 @@ export function LivePreview({ sessionId }: Props) {
                 onBackToLive={handleBackToLive}
                 showShortcuts={showShortcuts}
                 onToggleShortcuts={() => setShowShortcuts((v) => !v)}
+                currentTime={currentTime}
+                videoDuration={videoDuration}
+                danmakuEvents={danmakuEvents}
+                sessionStartTime={sessionDetail?.session.start_time ?? 0}
+                candidates={candidates}
+                selection={selection}
+                onSeek={handleSeek}
               />
             )}
             {id === "subtitles" && (
@@ -696,6 +876,8 @@ export function LivePreview({ sessionId }: Props) {
       handleSeek,
       handleSelectCandidate,
       handleExport,
+      videoDuration,
+      sessionDetail,
     ]
   );
 
@@ -765,6 +947,13 @@ function VideoPanel({
   onBackToLive,
   showShortcuts,
   onToggleShortcuts,
+  currentTime,
+  videoDuration,
+  danmakuEvents,
+  sessionStartTime,
+  candidates,
+  selection,
+  onSeek,
 }: {
   playerRef: React.RefObject<HTMLVideoElement | null>;
   isLiveMode: boolean;
@@ -773,11 +962,81 @@ function VideoPanel({
   onBackToLive: () => void;
   showShortcuts: boolean;
   onToggleShortcuts: () => void;
+  currentTime: number;
+  videoDuration: number;
+  danmakuEvents: DanmakuEvent[];
+  sessionStartTime: number;
+  candidates: Candidate[];
+  selection: ClipSelection | null;
+  onSeek: (time: number) => void;
 }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const video = playerRef.current;
+    if (!video) return;
+
+    const handlePlay = () => setIsPlaying(true);
+    const handlePause = () => setIsPlaying(false);
+    const handleEnded = () => setIsPlaying(false);
+
+    video.addEventListener("play", handlePlay);
+    video.addEventListener("pause", handlePause);
+    video.addEventListener("ended", handleEnded);
+
+    setIsPlaying(!video.paused);
+
+    return () => {
+      video.removeEventListener("play", handlePlay);
+      video.removeEventListener("pause", handlePause);
+      video.removeEventListener("ended", handleEnded);
+    };
+  }, [playerRef]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement === containerRef.current);
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  const handleTogglePlay = useCallback(() => {
+    const video = playerRef.current;
+    if (!video) return;
+    if (video.paused) {
+      void video.play().catch(() => {});
+      return;
+    }
+    video.pause();
+  }, [playerRef]);
+
+  const handleToggleFullscreen = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (document.fullscreenElement === el) {
+      void document.exitFullscreen().catch(() => {});
+      return;
+    }
+    void el.requestFullscreen?.().catch(() => {});
+  }, []);
+
   return (
     <div className="live-preview-video-wrap" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ position: "relative", flex: 1, minHeight: 0, overflow: "hidden" }}>
-        <video ref={playerRef} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+      <div ref={containerRef} style={{ position: "relative", flex: 1, minHeight: 0, overflow: "hidden" }}>
+        <video ref={playerRef} style={{ width: "100%", height: "100%", objectFit: "contain" }} onClick={handleTogglePlay} />
+        <div className="live-preview-video-controls">
+          <button className="btn btn-sm live-preview-video-control-btn" onClick={handleTogglePlay} title={isPlaying ? "暂停" : "播放"}>
+            {isPlaying ? <Pause size={14} /> : <Play size={14} />}
+            {isPlaying ? "暂停" : "播放"}
+          </button>
+          <button className="btn btn-sm live-preview-video-control-btn" onClick={handleToggleFullscreen} title={isFullscreen ? "退出全屏" : "全屏"}>
+            {isFullscreen ? <Minimize size={14} /> : <Maximize size={14} />}
+            {isFullscreen ? "退出全屏" : "全屏"}
+          </button>
+        </div>
         {!isLiveMode && isRecording && (
           <button className="btn btn-sm live-preview-back-to-live" onClick={onBackToLive}>
             回到最新
@@ -808,6 +1067,15 @@ function VideoPanel({
           <ShortcutsHelp onClose={onToggleShortcuts} />
         )}
       </div>
+      <VideoProgressBar
+        currentTime={currentTime}
+        duration={videoDuration}
+        danmakuEvents={danmakuEvents}
+        sessionStartTime={sessionStartTime}
+        candidates={candidates}
+        selection={selection}
+        onSeek={onSeek}
+      />
     </div>
   );
 }

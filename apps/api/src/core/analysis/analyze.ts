@@ -194,12 +194,11 @@ export async function analyzeWindow(
       continue;
     }
 
-    // ── 第三层：LLM 描述 (S/A 级) ──
-    // B 级不调 LLM (节省 token)，但仍记录候选
+    // ── 第三层：LLM 描述 ──
     let description: string | null = null;
     let llmScore = 0;
 
-    if (score.grade === "S" || score.grade === "A") {
+    {
       // 按频次排序弹幕 (高频弹幕更有分析价值)
       const freqSorted = sortDanmakuByFrequency(windowData.danmakuSamples);
 
